@@ -1,0 +1,70 @@
+{
+  "entities": {
+    "User": {
+      "title": "User",
+      "description": "Authenticated user profile in VyaparTrust",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string", "description": "Firebase Auth UID" },
+        "email": { "type": "string", "format": "email", "description": "User email address" },
+        "displayName": { "type": "string", "maxLength": 100, "description": "Display name of user" },
+        "photoURL": { "type": "string", "maxLength": 500000, "description": "Avatar or profile image data URI or URL" },
+        "role": { "type": "string", "enum": ["merchant", "underwriter", "admin"], "description": "User role" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["uid", "email"]
+    },
+    "MerchantProfile": {
+      "title": "MerchantProfile",
+      "description": "Kirana merchant financial and business identity",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string", "description": "Firebase Auth UID of the merchant owner" },
+        "ownerName": { "type": "string", "maxLength": 100, "description": "Proprietor name" },
+        "storeName": { "type": "string", "maxLength": 120, "description": "Retail kirana shop name" },
+        "category": { "type": "string", "maxLength": 100, "description": "Business trade category" },
+        "location": { "type": "string", "maxLength": 200, "description": "Physical shop location and city" },
+        "pinCode": { "type": "string", "maxLength": 10, "pattern": "^[0-9]{6}$", "description": "6-digit postal PIN code" },
+        "profilePhotoUrl": { "type": "string", "maxLength": 500000, "description": "Custom merchant profile picture data URL" },
+        "gstin": { "type": "string", "maxLength": 20, "description": "GSTIN registration number" },
+        "udyamId": { "type": "string", "maxLength": 30, "description": "MSME Udyam registration ID" },
+        "healthScore": { "type": "integer", "description": "Vyapar Trust health score (0-100)" },
+        "riskGrade": { "type": "string", "description": "Underwriting risk tier" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["userId", "storeName", "ownerName"]
+    },
+    "UserSettings": {
+      "title": "UserSettings",
+      "description": "User and merchant location and application settings",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string", "description": "Firebase Auth UID" },
+        "location": { "type": "string", "maxLength": 200, "description": "Updated storefront address" },
+        "city": { "type": "string", "maxLength": 80, "description": "City" },
+        "state": { "type": "string", "maxLength": 80, "description": "State" },
+        "pinCode": { "type": "string", "maxLength": 10, "description": "Postal code" },
+        "profilePhotoUrl": { "type": "string", "maxLength": 500000, "description": "Profile picture URL or Base64 avatar" },
+        "language": { "type": "string", "enum": ["en", "hi", "bn"], "description": "Preferred language" },
+        "voiceAssistEnabled": { "type": "boolean", "description": "Whether Gemini Live Voice is enabled" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["userId"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": { "$ref": "#/entities/User" },
+      "description": "Public and private user records keyed by user UID"
+    },
+    "/merchants/{merchantId}": {
+      "schema": { "$ref": "#/entities/MerchantProfile" },
+      "description": "Merchant business profiles and underwriting attributes"
+    },
+    "/settings/{userId}": {
+      "schema": { "$ref": "#/entities/UserSettings" },
+      "description": "Merchant customized location, profile photo, and preferences"
+    }
+  }
+}

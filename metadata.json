@@ -1,0 +1,6 @@
+{
+  "name": "VyaparTrust - Sovereign MSME Financial Trust",
+  "description": "Consent-driven, explainable financial underwriting and MSME credit passport platform for Indian retail kirana merchants.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
