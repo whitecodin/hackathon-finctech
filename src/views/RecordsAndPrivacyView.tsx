@@ -5,7 +5,7 @@ import {useShop} from '../context/ShopContext.tsx';
 import {supabase} from '../lib/supabase.ts';
 
 type AuditRow={id:number;record_table:string;record_id:string;action:'INSERT'|'UPDATE'|'DELETE';occurred_at:string};
-const labels:Record<string,string>={shop_contacts:'Customer or supplier',shop_dues:'Udhar',shop_stock:'Stock item',shop_entries:'Daily Hisaab',shop_reconciliation:'Statement match',shop_stock_movements:'Item sale or restock',mohalla_campaigns:'Mohalla request',mohalla_pledges:'Group pledge',merchants:'Shop profile',transactions:'Transaction record',merchant_league_preferences:'Bazaar League settings',shop_payment_connections:'Payment provider connection',shop_payment_link_requests:'Payment connection request',shop_payment_webhook_events:'Provider notification'};
+const labels:Record<string,string>={shop_contacts:'Customer or supplier',shop_dues:'Udhar',shop_stock:'Stock item',shop_entries:'Daily Hisaab',shop_reconciliation:'Statement match',shop_stock_movements:'Item sale or restock',shop_stock_cycles:'Smart Restock observations',mohalla_campaigns:'Mohalla request',mohalla_pledges:'Group pledge',merchants:'Shop profile',transactions:'Transaction record',merchant_league_preferences:'Bazaar League settings',shop_payment_connections:'Payment provider connection',shop_payment_link_requests:'Payment connection request',shop_payment_webhook_events:'Provider notification'};
 const pretty=(k:string)=>labels[k]||k.replaceAll('_',' ');
 
 export function AuditLogView({onNavigate}:{onNavigate:(p:NavPath)=>void}){
@@ -44,6 +44,7 @@ const tables=[
  ['shop_dues','dues'],
  ['shop_stock','stock'],
  ['shop_stock_movements','stock_movements'],
+ ['shop_stock_cycles','personalized_restock_observations'],
  ['shop_reconciliation','statement_uploads'],
  ['transactions','transactions'],
  ['mohalla_campaigns','group_requests'],
@@ -66,7 +67,7 @@ export function DataControlsView({onNavigate}:{onNavigate:(p:NavPath)=>void}){
  const exportData=async()=>{
   setBusy(true);setError('');setMessage('');
   try{
-   if(shop.demo){downloadJson({source:'FICTIONAL DEMO ONLY',generatedAt:new Date().toISOString(),contacts:shop.contacts,dues:shop.dues,stock:shop.stock,entries:shop.entries});setMessage('Sample export downloaded.');return}
+   if(shop.demo){downloadJson({source:'FICTIONAL DEMO ONLY',generatedAt:new Date().toISOString(),contacts:shop.contacts,dues:shop.dues,stock:shop.stock,stockCycles:shop.stockCycles,entries:shop.entries});setMessage('Sample export downloaded.');return}
    if(!merchant?.id||!user)throw Error('Sign in first.');
    const authProfile=await supabase.auth.getUser();if(authProfile.error)throw authProfile.error;
    const profile=authProfile.data.user;

@@ -12,6 +12,7 @@ BEGIN
  DELETE FROM public.shop_payment_connections WHERE merchant_id=mid;
  DELETE FROM public.shop_payment_link_requests WHERE merchant_id=mid;
  DELETE FROM public.shop_reconciliation WHERE merchant_id=mid;
+ DELETE FROM public.shop_stock_cycles WHERE merchant_id=mid;
  DELETE FROM public.shop_stock_movements WHERE merchant_id=mid;
  DELETE FROM public.mohalla_pledges WHERE merchant_id=mid;
  DELETE FROM public.mohalla_campaigns WHERE merchant_id=mid;

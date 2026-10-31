@@ -1,9 +1,12 @@
 import type {NavPath,Language} from '../types.ts';
 import type {ShopEntry,ShopDue,ShopStock,ShopContact} from '../context/ShopContext.tsx';
 import {indiaDate} from './shopLogic.ts';
+import type {CycleEvent} from './restockInsights.ts';
+import {analyzeRestockCycles} from './restockInsights.ts';
+import {findStockMention} from './stockVoice.ts';
 export type SaathiRoute=NavPath|'none';
 type Guide={answer:string;route:SaathiRoute};
-export type SaathiSnapshot={entries:ShopEntry[];dues:ShopDue[];stock:ShopStock[];contacts:ShopContact[];isDemo:boolean};
+export type SaathiSnapshot={entries:ShopEntry[];dues:ShopDue[];stock:ShopStock[];contacts:ShopContact[];isDemo:boolean;stockCycles?:CycleEvent[]};
 const fmt=(n:number)=>new Intl.NumberFormat('en-IN',{style:'currency',currency:'INR',maximumFractionDigits:0}).format(n);
 const content={
  en:{
@@ -89,6 +92,18 @@ export function saathiGuide(question:string,lang:Language,s:SaathiSnapshot):Guid
  }
 
  const low=s.stock.filter(x=>x.quantity<=x.reorder_at);
+
+ const mentionedStock=findStockMention(q,s.stock);
+ const restockQuestion=/(?:\b(?:when|next|reorder|restock|run out|finish|empty|how much|how many|order|mangana|khatam)\b|कब|कितना|कितनी|कितने|खत्म|मंगाऊँ|मंगाना|मँगाना|आगे|आवश्यक|কখন|কত)/iu.test(q);
+ if(mentionedStock&&restockQuestion){
+  const insight=analyzeRestockCycles(s.stockCycles||[],mentionedStock.id,day);
+  if(insight.confidence==='learning'){
+   return {answer:lang==='hi'?mentionedStock.item_name+' के लिए '+insight.completedCycles+' पूरा चक्र दर्ज है। पहले दो बार नया माल आने और खत्म होने की तारीख रिकॉर्ड करें। उसके बाद मैं बता सकूँगा लगभग कब खत्म होगा और कितना मंगाएँ।':lang==='bn'?mentionedStock.item_name+'-এর জন্য যথেষ্ট পূর্ণ চক্র নেই। অন্তত দুবার পণ্য আসা ও শেষ হওয়া রিপোর্ট করুন।':'I am still learning '+mentionedStock.item_name+'. Record when each batch arrives and when it runs out. After two completed cycles I can estimate a run-out date and order quantity.',route:'stock'};
+  }
+  const info=lang==='hi'?mentionedStock.item_name+' की दुकान-विशेष अनुमानित खपत '+insight.dailyRate+' '+mentionedStock.unit+' रोज़ है। अनुमानित खत्म होने की तारीख: '+(insight.runoutOn||'अभी माल खत्म है')+'। अगले 16 दिनों के लिए लगभग '+insight.suggestedOrder+' '+mentionedStock.unit+' मंगाने पर विचार करें। यह पक्का स्टॉक नहीं है।':lang==='bn'?mentionedStock.item_name+'-এর গড় ব্যবহার আনুমানিক '+insight.dailyRate+' '+mentionedStock.unit+' প্রতিদিন। সম্ভাব্য শেষ হওয়া '+(insight.runoutOn||'এখনই শেষ')+'। আনুমানিক অর্ডার '+insight.suggestedOrder+' '+mentionedStock.unit+'।':'Based on your own shop history, '+mentionedStock.item_name+' is estimated to use '+insight.dailyRate+' '+mentionedStock.unit+'/day. Possible run-out: '+(insight.runoutOn||'already out')+'. Consider about '+insight.suggestedOrder+' '+mentionedStock.unit+' for a 16-day plan. These are estimates, not counted stock.';
+  return {answer:info,route:'stock'};
+ }
+
 
  const named=s.stock.find(x=>x.item_name.trim().length>1&&q.includes(x.item_name.trim().toLocaleLowerCase()));
  if(named&&/(?:\b(?:stock|left|remaining|quantity|kitna|how much|how many)\b|कितन|सामान|बचा|স্টক|কত)/iu.test(q)){

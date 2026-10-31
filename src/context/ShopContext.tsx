@@ -3,6 +3,8 @@ import {useAuth} from '../context/AuthContext.tsx';
 import {useDemo} from '../demo/DemoContext.tsx';
 import {supabase} from '../lib/supabase.ts';
 import {indiaDate} from '../lib/shopLogic.ts';
+import {validateCheckpoint} from '../lib/restockInsights.ts';
+import type {CycleEvent} from '../lib/restockInsights.ts';
 export {dailyTasks} from '../lib/shopLogic.ts';
 
 export type ShopContact={id:string;merchant_id:number;kind:'customer'|'supplier';name:string;phone:string|null;repeat_items:string;repeat_consent:boolean};
@@ -11,9 +13,9 @@ export type ShopStock={id:string;merchant_id:number;item_name:string;unit:'pcs'|
 export type ShopEntry={id:string;merchant_id:number;entry_date:string;kind:'sale'|'expense';payment_method:'Cash'|'UPI'|'Bank'|'Other';amount:number;note:string;source?:'manual'|'provider';provider?:string|null;provider_reference?:string|null;payment_verified_at?:string|null;matched_provider_entry_id?:string|null};
 type Group='contacts'|'dues'|'stock'|'entries';
 type RecordOf<G extends Group>=G extends 'contacts'?ShopContact:G extends 'dues'?ShopDue:G extends 'stock'?ShopStock:ShopEntry;
-type Store={contacts:ShopContact[];dues:ShopDue[];stock:ShopStock[];entries:ShopEntry[]};
-type ContextValue=Store&{loading:boolean;error:string;demo:boolean;refresh:()=>Promise<void>;add:<G extends Group>(group:G,value:Omit<RecordOf<G>,'id'|'merchant_id'>)=>Promise<boolean>;patch:<G extends Group>(group:G,id:string,value:Partial<Omit<RecordOf<G>,'id'|'merchant_id'>>)=>Promise<boolean>;remove:<G extends Group>(group:G,id:string)=>Promise<boolean>};
-const empty=():Store=>({contacts:[],dues:[],stock:[],entries:[]});
+type Store={contacts:ShopContact[];dues:ShopDue[];stock:ShopStock[];entries:ShopEntry[];stockCycles:CycleEvent[]};
+type ContextValue=Store&{loading:boolean;error:string;demo:boolean;refresh:()=>Promise<void>;recordCheckpoint:(stockId:string,kind:'stockout'|'restocked',amount:number|null)=>Promise<boolean>;add:<G extends Group>(group:G,value:Omit<RecordOf<G>,'id'|'merchant_id'>)=>Promise<boolean>;patch:<G extends Group>(group:G,id:string,value:Partial<Omit<RecordOf<G>,'id'|'merchant_id'>>)=>Promise<boolean>;remove:<G extends Group>(group:G,id:string)=>Promise<boolean>};
+const empty=():Store=>({contacts:[],dues:[],stock:[],entries:[],stockCycles:[]});
 const today=()=>indiaDate();
 const dateOffset=(n:number)=>{const x=new Date();x.setDate(x.getDate()+n);return indiaDate(x)};
 export const formatRupees=(n:number)=>new Intl.NumberFormat('en-IN',{style:'currency',currency:'INR',maximumFractionDigits:0}).format(n);
@@ -38,7 +40,8 @@ function sample():Store{
  {id:'d-k3',merchant_id:mid,item_name:'Rice',unit:'kg',quantity:18,reorder_at:10,last_cost:52},
  {id:'d-k4',merchant_id:mid,item_name:'Sugar',unit:'kg',quantity:6,reorder_at:7,last_cost:46},
  {id:'d-k5',merchant_id:mid,item_name:'Tea',unit:'packs',quantity:13,reorder_at:5,last_cost:125},
- {id:'d-k6',merchant_id:mid,item_name:'Biscuits',unit:'packs',quantity:27,reorder_at:12,last_cost:15}
+ {id:'d-k6',merchant_id:mid,item_name:'Biscuits',unit:'packs',quantity:27,reorder_at:12,last_cost:15},
+ {id:'d-k7',merchant_id:mid,item_name:'Aloo',unit:'kg',quantity:12,reorder_at:5,last_cost:22}
  ];
  const entries:ShopEntry[]=[
  {id:'d-e1',merchant_id:mid,entry_date:today(),kind:'sale',payment_method:'Cash',amount:1950,note:'Morning counter'},
@@ -48,14 +51,20 @@ function sample():Store{
  {id:'d-e3',merchant_id:mid,entry_date:today(),kind:'expense',payment_method:'Cash',amount:750,note:'Local delivery and supplies'},
  {id:'d-e4',merchant_id:mid,entry_date:dateOffset(-1),kind:'sale',payment_method:'Cash',amount:3400,note:'Yesterday sales'}
  ];
- return {contacts,dues,stock,entries};
+ const stockCycles:CycleEvent[]=[];
+ const checkpoints=(stock_id:string,points:[number,'restocked'|'stockout',number|null][])=>points.forEach(([days,event_type,quantity],i)=>stockCycles.push({id:'demo-'+stock_id+'-'+i,merchant_id:mid,stock_id,event_type,quantity,reported_on:dateOffset(days),created_at:new Date(Date.parse(dateOffset(days)+'T08:00:00Z')+i*1000).toISOString()}));
+ checkpoints('d-k1',[[-75,'restocked',42],[-53,'stockout',null],[-52,'restocked',45],[-30,'stockout',null],[-29,'restocked',48],[-8,'stockout',null],[-7,'restocked',30]]);
+ checkpoints('d-k2',[[-59,'restocked',24],[-42,'stockout',null],[-41,'restocked',30],[-19,'stockout',null],[-18,'restocked',22]]);
+ checkpoints('d-k7',[[-65,'restocked',50],[-45,'stockout',null],[-44,'restocked',45],[-26,'stockout',null],[-25,'restocked',60],[-4,'stockout',null],[-3,'restocked',36]]);
+ return {contacts,dues,stock,entries,stockCycles};
 }
 const Context=createContext<ContextValue|null>(null);
 const tables:Record<Group,string>={contacts:'shop_contacts',dues:'shop_dues',stock:'shop_stock',entries:'shop_entries'};
 const numeric=(data:Store):Store=>({
  contacts:data.contacts,dues:data.dues.map(x=>({...x,amount:Number(x.amount),settled:Number(x.settled)})),
  stock:data.stock.map(x=>({...x,quantity:Number(x.quantity),reorder_at:Number(x.reorder_at),last_cost:x.last_cost===null?null:Number(x.last_cost)})),
- entries:data.entries.map(x=>({...x,amount:Number(x.amount)}))
+ entries:data.entries.map(x=>({...x,amount:Number(x.amount)})),
+ stockCycles:data.stockCycles.map(x=>({...x,quantity:x.quantity===null?null:Number(x.quantity)}))
 });
 export function ShopProvider({children}:{children:React.ReactNode}){
  const {merchant}=useAuth();const {demoEnabled}=useDemo();const [store,setStore]=useState<Store>(demoEnabled?sample():empty());
@@ -79,7 +88,16 @@ export function ShopProvider({children}:{children:React.ReactNode}){
     throw new Error('Shop has more than 5,000 records in one section; server pagination required');
    }));
    if(version!==requestVersion.current)return;
-   setStore(numeric({contacts:all[0] as ShopContact[],dues:all[1] as ShopDue[],stock:all[2] as ShopStock[],entries:all[3] as ShopEntry[]}));
+   const checkpoints:CycleEvent[]=[];
+   for(let offset=0;offset<5000;offset+=500){
+    const resp=await supabase.from('shop_stock_cycles').select('id,merchant_id,stock_id,event_type,quantity,reported_on,created_at').eq('merchant_id',merchant.id).order('created_at',{ascending:false}).range(offset,offset+499);
+    if(resp.error)throw resp.error;
+    checkpoints.push(...(resp.data||[]) as CycleEvent[]);
+    if((resp.data||[]).length<500)break;
+    if(offset+500>=5000)throw new Error('Shop has more than 5,000 stock checkpoints; server pagination required');
+   }
+   if(version!==requestVersion.current)return;
+   setStore(numeric({contacts:all[0] as ShopContact[],dues:all[1] as ShopDue[],stock:all[2] as ShopStock[],entries:all[3] as ShopEntry[],stockCycles:checkpoints}));
   }catch(e){
    if(version!==requestVersion.current)return;
    setStore(empty());
@@ -95,6 +113,25 @@ export function ShopProvider({children}:{children:React.ReactNode}){
   document.addEventListener('visibilitychange',onActive);
   return ()=>{window.clearInterval(poll);window.removeEventListener('focus',onActive);document.removeEventListener('visibilitychange',onActive)};
  },[demoEnabled,merchant?.id,refresh]);
+ const recordCheckpoint=async(stockId:string,kind:'stockout'|'restocked',amount:number|null):Promise<boolean>=>{
+  setError('');
+  if(!validateCheckpoint(kind,amount)){setError('Invalid stock checkpoint amount.');return false}
+  const target=store.stock.find(x=>x.id===stockId);
+  if(!target){setError('Stock item not found.');return false}
+  if(kind==='stockout'){
+   const latest=store.stockCycles.filter(x=>x.stock_id===stockId).sort((a,b)=>b.created_at.localeCompare(a.created_at))[0];
+   if(latest?.event_type==='stockout'){setError('Already marked finished. Record a restock first.');return false}
+  }
+  if(demoEnabled){
+   const event:CycleEvent={id:'d-cycle-'+Date.now()+'-'+Math.random().toString(36).slice(2),merchant_id:-1,stock_id:stockId,event_type:kind,quantity:amount,reported_on:today(),created_at:new Date().toISOString()};
+   setStore(old=>({...old,stock:old.stock.map(x=>x.id===stockId?{...x,quantity:kind==='stockout'?0:x.quantity+(amount||0)}:x),stockCycles:[event,...old.stockCycles]}));
+   return true;
+  }
+  if(!merchant?.id){setError('Sign in first.');return false}
+  const res=await supabase.rpc('record_my_stock_checkpoint',{p_stock_id:stockId,p_event_type:kind,p_quantity:amount});
+  if(res.error){setError(res.error.message||'Could not record stock checkpoint.');return false}
+  await refresh();return true;
+ };
  const add=async<G extends Group>(group:G,value:Omit<RecordOf<G>,'id'|'merchant_id'>):Promise<boolean>=>{
   setError('');const row={...value,merchant_id:demoEnabled?-1:merchant?.id};
   if(demoEnabled){setStore(old=>({...old,[group]:[{...row,id:'d-'+Date.now()+'-'+Math.random().toString(36).slice(2)},...old[group]]}));return true}
@@ -119,6 +156,6 @@ export function ShopProvider({children}:{children:React.ReactNode}){
   if(result.error||!result.data){setError('Could not remove this record.');return false}
   await refresh();return true
  };
- return <Context.Provider value={{...store,loading,error,demo:demoEnabled,refresh,add,patch,remove}}>{children}</Context.Provider>
+ return <Context.Provider value={{...store,loading,error,demo:demoEnabled,refresh,recordCheckpoint,add,patch,remove}}>{children}</Context.Provider>
 }
 export function useShop(){const ctx=useContext(Context);if(!ctx)throw Error('Missing ShopProvider');return ctx}

@@ -6,6 +6,8 @@ import {supabase} from '../lib/supabase.ts';
 import {forecastSevenDays} from '../lib/operations.ts';
 import type {StockSale} from '../lib/operations.ts';
 import {indiaDate} from '../lib/shopLogic.ts';
+import {analyzeRestockCycles} from '../lib/restockInsights.ts';
+import {useRestockPreferences} from '../lib/restockPreferences.ts';
 function makeDemoHistory(ids:string[]):StockSale[]{
  const rows:StockSale[]=[];const now=Date.parse(indiaDate()+'T00:00:00Z');
  ids.slice(0,3).forEach((id,j)=>{for(let i=0;i<27;i++){const d=new Date(now-i*86400000).toISOString().slice(0,10);rows.push({stock_id:id,moved_on:d,movement_kind:'sold',quantity:1+((i*3+j)%5)})}});
@@ -13,6 +15,7 @@ function makeDemoHistory(ids:string[]):StockSale[]{
 }
 export function DemandForecastView({onNavigate}:{onNavigate:(p:NavPath)=>void}){
  const shop=useShop(),{merchant}=useAuth();
+ const prefs=useRestockPreferences(shop.demo?-1:merchant?.id);
  const [sales,setSales]=useState<StockSale[]>([]),[selected,setSelected]=useState(''),[kind,setKind]=useState<'sold'|'restocked'>('sold'),[qty,setQty]=useState(''),[busy,setBusy]=useState(false),[error,setError]=useState(''),[message,setMessage]=useState('');
  const load=useCallback(async()=>{
   if(shop.demo){setSales(makeDemoHistory(shop.stock.map(x=>x.id)));return}
@@ -25,6 +28,8 @@ export function DemandForecastView({onNavigate}:{onNavigate:(p:NavPath)=>void}){
  const item=shop.stock.find(x=>x.id===selected)||shop.stock[0];
  const history=useMemo(()=>sales.filter(x=>x.stock_id===item?.id),[sales,item?.id]);
  const forecast=useMemo(()=>forecastSevenDays(history,indiaDate()),[history]);
+ const plan=item?prefs.get(item.id):null;
+ const smart=useMemo(()=>item?analyzeRestockCycles(shop.stockCycles,item.id,indiaDate(),plan||{}):null,[shop.stockCycles,item,plan?.leadDays,plan?.planDays,plan?.bufferDays]);
  const submit=async(e:React.FormEvent)=>{
   e.preventDefault();if(!item)return;const amount=Number(qty);if(!Number.isFinite(amount)||amount<=0||amount>100000)return;
   setBusy(true);setError('');setMessage('');
@@ -46,7 +51,14 @@ export function DemandForecastView({onNavigate}:{onNavigate:(p:NavPath)=>void}){
  return <div className="ops-page">
  <div className="vc-page-head"><button className="vc-back" onClick={()=>onNavigate('overview')}>← My Dukaan</button><h2>Kal Ka Samaan</h2><p>Use actual recorded item sales to estimate next week's stock needs.</p></div>
  {shop.demo&&<p className="ops-safety">✳ DEMO — movement history is fictional and does not touch real data.</p>}
- <section className="vc-panel vc-form"><h3>Record an item sale or restock</h3>
+ {item&&<section className="vc-panel sr-forecast-guide"><div className="ops-heading"><h3>Smart Restock · less typing</h3><span className="ops-label">{smart?.confidence==='learning'?'Learning':'Personalized estimate'}</span></div>
+ <p>Simply report when {item.item_name} is finished and how much arrives next. Daily sale entries are optional.</p>
+ {smart?.confidence==='learning'?<p className="sr-explain">After two completed restock-to-stock-out cycles, you'll see shop-specific estimates here. {smart?.completedCycles||0} completed so far.</p>:
+ <div className="sr-metric-grid"><div className="sr-metric"><span>Typical daily use</span><strong>{smart?.dailyRate} <small>{item.unit}</small></strong></div><div className="sr-metric"><span>Estimated empty date</span><strong>{smart?.runoutOn||'Out now'}</strong></div><div className="sr-metric"><span>Suggested order ({(plan?.planDays??14)+(plan?.bufferDays??2)} days)</span><strong>{smart?.suggestedOrder} <small>{item.unit}</small></strong><p>Order by {smart?.reorderOn||'—'} · {plan?.leadDays??2} supplier days</p></div></div>}
+ <button type="button" className="easy-back" onClick={()=>onNavigate('stock')}>Open Smart Restock in My Stock <span className="material-symbols-outlined">arrow_forward</span></button>
+ <p className="vc-foot">Based on your completed supply cycles, not automatic product sales detection. Estimates may be wrong if some deliveries are not reported.</p>
+ </section>}
+ <section className="vc-panel vc-form"><h3>Advanced: optional item-by-item sale tracking</h3>
  <p className="vc-foot">Forecasting needs quantity sold for each item. Total rupee sales alone cannot tell us which items to reorder.</p>
  <form onSubmit={e=>void submit(e)} className="vc-form">
  <div className="vc-form-grid"><label>Item<select value={item?.id||''} onChange={e=>setSelected(e.target.value)}><option value="">Choose item</option>{shop.stock.map(x=><option key={x.id} value={x.id}>{x.item_name} · {x.quantity} {x.unit}</option>)}</select></label>

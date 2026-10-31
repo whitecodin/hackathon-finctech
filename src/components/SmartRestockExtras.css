@@ -1,0 +1,14 @@
+/* Extra controls for personalized, low-effort Smart Restock */
+.sr-settings{display:grid;gap:11px;border:1px solid var(--ui-border);border-radius:13px;padding:14px;background:var(--ui-panel)}
+.sr-settings>div:first-child{display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:6px}
+.sr-settings strong{font-size:13px;color:var(--ui-text)}
+.sr-settings small{font-size:11px;color:var(--ui-sub)}
+.sr-settings-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px}
+.sr-settings-grid label{display:grid;gap:6px;font-size:12px;font-weight:750;color:var(--ui-sub)}
+.sr-settings-grid select{width:100%;min-height:43px;border:1px solid var(--ui-border);border-radius:10px;padding:8px;background:var(--desi-raised);color:var(--ui-text);font-size:13px}
+.sr-use-amount{margin-top:8px;padding:8px 11px;border-radius:8px;background:var(--desi-gold-light);border:1px solid var(--ui-border);font-weight:800;font-size:11px;color:var(--ui-text);min-height:34px}
+.sr-use-amount:hover,.sr-use-amount:focus-visible{border-color:var(--desi-clay)}
+.sr-order-signal{display:flex;align-items:flex-start;gap:10px;border:1px solid var(--ui-border);border-radius:12px;background:var(--desi-gold-light);padding:13px;font-size:12px;line-height:1.55}
+.sr-order-signal>.material-symbols-outlined{color:var(--desi-clay)}
+.sr-order-signal div{display:grid;gap:4px}.sr-order-signal strong{color:var(--ui-text)}.sr-order-signal small{color:var(--ui-sub)}
+@media(max-width:650px){.sr-settings-grid{grid-template-columns:1fr}.sr-settings>div:first-child{display:grid}}

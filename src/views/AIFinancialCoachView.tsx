@@ -7,6 +7,8 @@ import {supabase} from '../lib/supabase.ts';
 import {saathiCopy,saathiGuide} from '../lib/saathiGuide.ts';
 import type {SaathiRoute} from '../lib/saathiGuide.ts';
 import {parseVoiceCommand,draftNote} from '../lib/voiceCommands.ts';
+import {parseStockVoice} from '../lib/stockVoice.ts';
+import type {StockVoiceAction} from '../lib/stockVoice.ts';
 import type {VoiceDraft,VoiceUnit,ManualMethod} from '../lib/voiceCommands.ts';
 import {createListener,stopSpeech,speak,classifySpeechError,describeVoiceProblem,voiceIsSecure,voiceAvailable,isBrave,testMicrophone} from '../lib/browserVoice.ts';
 import type {SpeechListener,VoiceProblem,MicDiagnostic} from '../lib/browserVoice.ts';
@@ -43,12 +45,13 @@ export function AIFinancialCoachView({onNavigate,initialQuery,merchant}:{merchan
  const [voiceLang,setVoiceLang]=useState<'hi-IN'|'en-IN'|'bn-IN'>(language==='bn'?'bn-IN':'hi-IN');
  const [readReplies,setReadReplies]=useState(false);
  const [draft,setDraft]=useState<VoiceDraft|null>(null),[recorded,setRecorded]=useState(false),[saving,setSaving]=useState(false),[savedMessage,setSavedMessage]=useState('');
+ const [stockDraft,setStockDraft]=useState<StockVoiceAction|null>(null);
  const tail=useRef<HTMLDivElement>(null),questionInput=useRef<HTMLTextAreaElement>(null),listener=useRef<SpeechListener|null>(null);
  const listeningTimeout=useRef<ReturnType<typeof setTimeout>|null>(null);
  const localRecorder=useRef<LocalRecorder|null>(null),localTimer=useRef<ReturnType<typeof setTimeout>|null>(null),localActive=useRef(false);
  const askRef=useRef<(q:string)=>Promise<void>>(async()=>{});
  const retryAt=useRef(0);
- const snapshot={entries:shop.entries,dues:shop.dues,stock:shop.stock,contacts:shop.contacts,isDemo:shop.demo};
+ const snapshot={entries:shop.entries,dues:shop.dues,stock:shop.stock,contacts:shop.contacts,stockCycles:shop.stockCycles,isDemo:shop.demo};
  const addAgent=(reply:string,route:SaathiRoute='none',origin:'live'|'guide'='guide')=>{
   setMessages(list=>[...list,{id:uid(),role:'assistant',text:reply,route,mode:origin}]);
   if(readReplies){const lang=voiceLang;speak(reply,lang)}
@@ -57,13 +60,19 @@ export function AIFinancialCoachView({onNavigate,initialQuery,merchant}:{merchan
  useEffect(()=>{if(initialQuery?.trim())setQuestion(initialQuery.trim())},[initialQuery]);
  useEffect(()=>{if(shop.demo||!user)setMode('guide')},[shop.demo,user]);
  useEffect(()=>()=>{listener.current?.abort();listener.current=null;if(listeningTimeout.current)clearTimeout(listeningTimeout.current);if(localTimer.current)clearTimeout(localTimer.current);localRecorder.current?.cancel();localActive.current=false;stopSpeech()},[]);
- const clear=()=>{if(loading||saving)return;setMessages([]);setWarning('');setVoiceReview(null);setDraft(null);setRecorded(false);setSavedMessage('');stopSpeech()};
+ const clear=()=>{if(loading||saving)return;setMessages([]);setWarning('');setVoiceReview(null);setDraft(null);setStockDraft(null);setRecorded(false);setSavedMessage('');stopSpeech()};
  const ask=async(text:string)=>{
   const q=text.trim().slice(0,1000);
   if(!q||loading||saving)return;
   setQuestion('');setVoiceReview(null);setWarning('');setSavedMessage('');stopSpeech();
   const prior=messages.slice(-8).map(m=>({role:m.role,text:m.text}));
   setMessages(list=>[...list,{id:uid(),role:'user',text:q}]);
+  const stockAction=parseStockVoice(q,shop.stock);
+  if(stockAction){
+    setStockDraft(stockAction);setDraft(null);setRecorded(false);
+    addAgent(language==='hi'?'मैंने सामान का अपडेट तैयार किया है। नीचे देखकर पक्का करें, फिर सेव करें।':'I prepared a stock checkpoint. Review the item and quantity, then confirm; nothing has changed yet.','stock');
+    return;
+  }
   const voiceDraft=parseVoiceCommand(q);
   const isFollowup=draft&&!voiceDraft&&q.length<120&&
     (/[₹\d०-९]/.test(q)||/\b(?:cash|upi|bank|rs)\b|नकद|कैश|रुपये|रुपए|किलो|लीटर|पीस|হাতে|টাকা/i.test(q))&&
@@ -251,6 +260,15 @@ export function AIFinancialCoachView({onNavigate,initialQuery,merchant}:{merchan
  };
  const updateDraft=<K extends keyof VoiceDraft>(key:K,value:VoiceDraft[K])=>{setDraft(old=>old?{...old,[key]:value}:null);setRecorded(false);setSavedMessage('')};
  const canSave=draft&&Number.isFinite(draft.amount)&&draft.amount!==null&&draft.amount>0&&draft.amount<=10000000&&(draft.intent!=='invoice'||(!!draft.item.trim()&&draft.quantity!==null&&draft.quantity>0));
+ const saveStockDraft=async()=>{
+  if(!stockDraft||saving)return;
+  setSaving(true);setWarning('');
+  const ok=await shop.recordCheckpoint(stockDraft.stockId,stockDraft.kind,stockDraft.quantity);
+  setSaving(false);
+  if(!ok){setWarning(shop.error||'Could not update stock. Check the item and try again.');return}
+  addAgent(language==='hi'?'अपडेट सेव हो गया। आपकी दुकान के पुराने चक्रों से नया अंदाज़ा बनने लगेगा।':'Saved your stock update. Your personalized restocking estimate will adapt as more cycles are recorded.','stock');
+  setStockDraft(null);
+ };
  const saveDraft=async()=>{
   if(!draft||!canSave||saving||recorded)return;
   setSaving(true);setSavedMessage('');setWarning('');
@@ -291,6 +309,12 @@ export function AIFinancialCoachView({onNavigate,initialQuery,merchant}:{merchan
      {loading&&<div className="saathi-message saathi-from-agent"><span className="saathi-avatar">सा</span><div className="saathi-thinking"><span/><span/><span/> {t.working}</div></div>}
      <div ref={tail}/>
     </div>
+    {stockDraft&&<section className="saathi-stock-draft" aria-label="Confirm stock update">
+      <div className="saathi-draft-heading"><span className="material-symbols-outlined">inventory_2</span><div><h3>{language==='hi'?'सामान का अपडेट जाँचें':'Review stock update'}</h3><small>{stockDraft.itemName} · {stockDraft.unit} · {stockDraft.kind==='stockout'?'Finished today':'New delivery'}</small></div><button type="button" onClick={()=>setStockDraft(null)} aria-label="Dismiss"><span className="material-symbols-outlined">close</span></button></div>
+      <p>{stockDraft.kind==='stockout'?(language==='hi'?'इस सामान का दर्ज स्टॉक 0 हो जाएगा।':'The recorded item quantity will be set to zero.'):language==='hi'?'इतना माल आपके दर्ज स्टॉक में जोड़ दिया जाएगा।':'This confirmed quantity will be added to recorded stock.'}</p>
+      {stockDraft.kind==='restocked'&&<label>{language==='hi'?'कितनी मात्रा आई?':'Received quantity'}<input type="number" min=".01" max="100000" step=".01" value={stockDraft.quantity??''} onChange={e=>setStockDraft(old=>old?{...old,quantity:e.target.value===''?null:Number(e.target.value)}:null)}/>{stockDraft.unit}</label>}
+      <div className="saathi-draft-actions"><button type="button" className="saathi-confirm" disabled={saving||(stockDraft.kind==='restocked'&&(!(stockDraft.quantity&&Number.isFinite(stockDraft.quantity))||stockDraft.quantity>100000))} onClick={()=>void saveStockDraft()}><span className="material-symbols-outlined">check_circle</span>{saving?'Saving…':language==='hi'?'हाँ, अपडेट सेव करें':'Confirm stock update'}</button><button type="button" className="saathi-discard" onClick={()=>setStockDraft(null)}>{language==='hi'?'रद्द करें':'Cancel'}</button></div>
+    </section>}
     {draft&&<section className="saathi-draft" aria-label={t.review}>
       <div className="saathi-draft-heading"><span className="material-symbols-outlined">{draft.intent==='invoice'?'receipt_long':'edit_note'}</span><div><h3>{draft.intent==='invoice'?t.invoice:t.review}</h3><small>{draft.intent==='expense'?'Expense':draft.intent==='invoice'?'Draft receipt':'Sale'} · {draft.day}</small></div><button type="button" onClick={()=>{setDraft(null);setSavedMessage('')}} aria-label={t.cancel}><span className="material-symbols-outlined">close</span></button></div>
       <div className="saathi-fields">
