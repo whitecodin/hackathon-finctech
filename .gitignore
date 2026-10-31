@@ -6,3 +6,13 @@ coverage/
 *.log
 .env*
 !.env.example
+
+.runtime/
+node_modules/
+
+.env.local
+
+# Local backups and downloaded model/cache assets
+.bazaar_demo_backups/
+.cache/
+*.onnx

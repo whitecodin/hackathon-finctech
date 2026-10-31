@@ -1,6 +1,6 @@
 import { db } from './index.ts';
 import { users, merchants, transactions, coachMessages } from './schema.ts';
-import { eq, desc } from 'drizzle-orm';
+import { eq, desc, and } from 'drizzle-orm';
 
 export async function getOrCreateUser(uid: string, email: string, displayName?: string) {
   try {
@@ -31,23 +31,23 @@ export async function getOrCreateUser(uid: string, email: string, displayName?: 
     if (existingMerchant.length === 0) {
       await db.insert(merchants).values({
         userId: newUser.id,
-        storeName: displayName ? `${displayName}'s Store` : 'Ramesh General Store',
-        ownerName: displayName || 'Ramesh Kumar',
+        storeName: displayName ? `${displayName}'s Store` : 'New Store',
+        ownerName: displayName || 'Merchant',
         category: 'Grocery & Daily Essentials (Kirana)',
         location: 'Jaipur, Rajasthan',
         pinCode: '302001',
-        gstin: '08AAACR4092K1Z9',
-        udyamId: 'UDYAM-RJ-14-002819',
-        bankAccount: 'SBI Current A/c ••8912',
-        healthScore: 78,
-        riskGrade: 'Grade A-',
-        creditBandMin: 50000,
-        creditBandMax: 100000,
-        safeEmiMin: 6500,
-        safeEmiMax: 8200,
-        resilienceDays: 18,
-        monthlyInflow: 160000,
-        dailyBurn: 4800,
+        gstin: 'NOT_VERIFIED',
+        udyamId: 'NOT_VERIFIED',
+        bankAccount: 'NOT_CONNECTED',
+        healthScore: 0,
+        riskGrade: 'Unassessed',
+        creditBandMin: 0,
+        creditBandMax: 0,
+        safeEmiMin: 0,
+        safeEmiMax: 0,
+        resilienceDays: 0,
+        monthlyInflow: 0,
+        dailyBurn: 0,
         passportUid: `VY-IND-2026-${Math.floor(100000 + Math.random() * 900000)}`,
       });
     }
@@ -77,10 +77,6 @@ export async function getMerchantDetails(uid: string) {
     if (userRes.length > 0) {
       merchant = await getMerchantByUserId(userRes[0].id);
     }
-    if (!merchant) {
-      const allMerchants = await db.select().from(merchants).limit(1);
-      merchant = allMerchants[0] || null;
-    }
     return merchant;
   } catch (error) {
     console.error('getMerchantDetails error:', error);
@@ -97,7 +93,7 @@ export async function getTransactionsByMerchantId(merchantId: number) {
   }
 }
 
-export async function updateTransactionStatus(txnId: number, status: string, note?: string) {
+export async function updateTransactionStatus(txnId: number, status: string, merchantId: number, note?: string) {
   try {
     const updateData: { status: string; merchantNote?: string } = { status };
     if (note !== undefined) {
@@ -105,7 +101,7 @@ export async function updateTransactionStatus(txnId: number, status: string, not
     }
     const res = await db.update(transactions)
       .set(updateData)
-      .where(eq(transactions.id, txnId))
+      .where(and(eq(transactions.id, txnId), eq(transactions.merchantId, merchantId)))
       .returning();
     return res[0];
   } catch (error) {

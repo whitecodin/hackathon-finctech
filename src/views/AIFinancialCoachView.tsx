@@ -1,738 +1,365 @@
-import React, { useState, useEffect, useRef } from 'react';
-import { NavPath, Merchant, ChatMessage, Language } from '../types.ts';
-import { GeminiLiveVoiceModal } from '../components/GeminiLiveVoiceModal.tsx';
+import React,{useEffect,useRef,useState} from 'react';
+import type {Merchant,NavPath,Language} from '../types.ts';
+import {useAuth} from '../context/AuthContext.tsx';
+import {useLanguage} from '../context/LanguageContext.tsx';
+import {useShop,formatRupees} from '../context/ShopContext.tsx';
+import {supabase} from '../lib/supabase.ts';
+import {saathiCopy,saathiGuide} from '../lib/saathiGuide.ts';
+import type {SaathiRoute} from '../lib/saathiGuide.ts';
+import {parseVoiceCommand,draftNote} from '../lib/voiceCommands.ts';
+import type {VoiceDraft,VoiceUnit,ManualMethod} from '../lib/voiceCommands.ts';
+import {createListener,stopSpeech,speak,classifySpeechError,describeVoiceProblem,voiceIsSecure,voiceAvailable,isBrave,testMicrophone} from '../lib/browserVoice.ts';
+import type {SpeechListener,VoiceProblem,MicDiagnostic} from '../lib/browserVoice.ts';
+import {beginLocalRecording,transcribeLocally,localMicSupported,localRecordingLimitMs} from '../lib/localWhisper.ts';
+import type {LocalRecorder,LocalProgress} from '../lib/localWhisper.ts';
+import {reviewTranscript,voiceActivitySummary,audioIsClearEnough} from '../lib/voiceReview.ts';
 
-interface AIFinancialCoachViewProps {
-  merchant: Merchant | null;
-  onNavigate: (path: NavPath) => void;
-  language: Language;
-  onLanguageChange: (lang: Language) => void;
-  initialQuery?: string;
-}
-
-export const AIFinancialCoachView: React.FC<AIFinancialCoachViewProps> = ({
-  merchant,
-  onNavigate,
-  language,
-  onLanguageChange,
-  initialQuery,
-}) => {
-  const [messages, setMessages] = useState<ChatMessage[]>([]);
-  const [inputMessage, setInputMessage] = useState<string>('');
-  const [isTyping, setIsTyping] = useState<boolean>(false);
-  const [isAudioPlaying, setIsAudioPlaying] = useState<boolean>(false);
-  const [showLiveVoiceModal, setShowLiveVoiceModal] = useState<boolean>(false);
-  const chatBottomRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    // If an initial query was passed from overview quick prompt
-    if (initialQuery && initialQuery.trim() !== '') {
-      handleSendMessage(initialQuery);
-    }
-  }, [initialQuery]);
-
-  useEffect(() => {
-    chatBottomRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [messages, isTyping]);
-
-  const handleSendMessage = async (textToSend?: string) => {
-    const text = textToSend || inputMessage;
-    if (!text.trim()) return;
-
-    const userMsg: ChatMessage = {
-      id: `user-${Date.now()}`,
-      sender: 'user',
-      text,
-      timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-    };
-
-    setMessages((prev) => [...prev, userMsg]);
-    if (!textToSend) setInputMessage('');
-    setIsTyping(true);
-
-    try {
-      const res = await fetch('/api/coach/chat', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ message: text, language }),
-      });
-
-      if (!res.ok) throw new Error('API failure');
-      const data = await res.json();
-
-      const aiMsg: ChatMessage = {
-        id: `ai-${Date.now()}`,
-        sender: 'ai',
-        text: data.reply,
-        timestamp: data.timestamp || new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-      };
-
-      setMessages((prev) => [...prev, aiMsg]);
-    } catch (err) {
-      console.error('Coach API call failed:', err);
-      // Grounded fallback
-      const fallbackAiMsg: ChatMessage = {
-        id: `ai-${Date.now()}`,
-        sender: 'ai',
-        text: `Namaste Ramesh ji! Based on your 90-day transactions (₹1.6L/month turnover), your store is in Good Standing (78/100). Resolving your 2 flagged transactions and keeping a ₹35,000 liquid buffer will elevate you to Tier-1 (85+ score), qualifying for up to ₹1.5L low-interest credit lines.`,
-        timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-      };
-      setMessages((prev) => [...prev, fallbackAiMsg]);
-    } finally {
-      setIsTyping(false);
-    }
-  };
-
-  const handleSpeechToggle = () => {
-    if (!('speechSynthesis' in window)) {
-      alert('Text-to-speech is not supported on this browser.');
+type Msg={id:string;role:'assistant'|'user';text:string;mode?:'live'|'guide';route?:SaathiRoute};
+const uid=()=>typeof crypto!=='undefined'&&'randomUUID'in crypto?crypto.randomUUID():String(Date.now()+Math.random());
+const routeLabels:Partial<Record<NavPath,string>>={
+ overview:'My Dukaan','daily-hisaab':'Daily Hisaab',udhar:'Udhar',stock:'My Stock',regulars:'Regular Customers',
+ 'auto-hisaab':'Auto Hisaab',reconciliation:'Match Payments',forecast:'Sales Forecast','merchant-league':'Bazaar League',
+ 'mohalla-power':'Mohalla Power','audit-history':'Activity History','data-controls':'My Data & Privacy',
+ settings:'Shop Settings','transaction-safety':'Payment Review','business-resilience':'My Savings',
+ 'credit-readiness':'Loan Guide','financial-passport':'Shop Details'
+};
+const availableRoutes=new Set(Object.keys(routeLabels));
+const texts={
+ en:{header:'Dukaan Saathi',sub:'Speak, ask, and write your Hisaab with confidence',guide:'App guide',live:'Live AI',ask:'Ask a question or describe today’s sale…',send:'Send',clear:'Clear chat',personal:'Use my shop totals for live AI answers',priv:'Off by default. Messages may be sent to the AI service when connected. Your shop summary is shared only if enabled. Never enter OTP or UPI PIN.',tip:'Please review every drafted transaction before saving. Saathi cannot send payments.',working:'Checking your question…',offline:'Live AI is unavailable. Dukaan Saathi is using its built-in shop guide.',start:'What can I help with?',quick:'Try asking',review:'Review before saving',record:'Save in Daily Hisaab',invoice:'Printable receipt draft',voice:'Speak in Hindi',voiceOff:'Stop listening',read:'Read replies aloud',cancel:'Discard draft',hint:'Payment method defaults to Cash; change it if the sale used UPI, Bank, or something else.',item:'Item or reason',quantity:'Quantity',amount:'Amount (₹)',method:'Payment method',print:'Print draft receipt',edit:'Check the amount, item and payment method. No stock quantity will change.',saved:'Saved to Daily Hisaab.',unsup:'Speech recognition is unavailable in this browser. You can type the same command.',noMic:'Microphone could not start. Allow microphone access or type your question.',voiceData:'Speech recognition may be processed by your browser’s speech provider; do not speak passwords or PINs.',demo:'Demo mode — saved entries are fictional.'},
+ hi:{header:'दुकान साथी',sub:'बोलकर पूछें, हिसाब लिखें, दुकान संभालें',guide:'ऐप गाइड',live:'लाइव AI',ask:'सवाल पूछें या आज की बिक्री बताएँ…',send:'भेजें',clear:'चैट साफ़',personal:'लाइव AI के लिए मेरी दुकान का हिसाब इस्तेमाल करें',priv:'शुरू में बंद है। लाइव AI चालू होने पर संदेश सेवा को जा सकते हैं। दुकान का सार आपकी इजाज़त से जाता है। OTP या PIN न दें।',tip:'हिसाब लिखने से पहले हमेशा जाँचकर पक्का करें। साथी पैसे नहीं भेजता।',working:'सवाल समझ रहे हैं…',offline:'लाइव AI उपलब्ध नहीं है। दुकान साथी अपने ऐप गाइड से जवाब दे रहा है।',start:'मैं क्या मदद करूँ?',quick:'ऐसे पूछिए',review:'लिखने से पहले जाँचें',record:'रोज़ के हिसाब में सेव करें',invoice:'बिल / रसीद का ड्राफ्ट',voice:'हिंदी में बोलें',voiceOff:'बोलना बंद करें',read:'जवाब सुनें',cancel:'ड्राफ्ट हटाएँ',hint:'डिफ़ॉल्ट नकद है। UPI या बैंक हो तो बदलें।',item:'सामान / वजह',quantity:'मात्रा',amount:'रकम (₹)',method:'भुगतान का तरीका',print:'रसीद प्रिंट करें',edit:'रकम और सामान पक्का करें। स्टॉक अपने आप नहीं कटेगा।',saved:'रोज़ के हिसाब में सेव हो गया।',unsup:'इस ब्राउज़र में बोलकर लिखने की सुविधा नहीं है। सवाल टाइप करें।',noMic:'माइक शुरू नहीं हुआ। अनुमति दें या लिखकर पूछें।',voiceData:'आपकी आवाज़ ब्राउज़र की स्पीच सेवा को जा सकती है। PIN या पासवर्ड न बोलें।',demo:'डेमो है — हिसाब काल्पनिक है।'},
+ bn:{header:'দোকান সাথী',sub:'কথা বলে জিজ্ঞেস করুন, হিসাব লিখুন',guide:'অ্যাপ গাইড',live:'লাইভ AI',ask:'প্রশ্ন করুন বা আজকের বিক্রি বলুন…',send:'পাঠান',clear:'চ্যাট মুছুন',personal:'লাইভ AI উত্তরে আমার দোকানের হিসাব ব্যবহার করুন',priv:'শুরুতে বন্ধ। লাইভ AI থাকলে লেখা বার্তা পাঠানো হতে পারে। দোকানের সারাংশ আপনার অনুমতিতে যাবে। PIN/OTP লিখবেন না।',tip:'রেকর্ড সংরক্ষণের আগে যাচাই করুন। সাথী টাকা পাঠাতে পারে না।',working:'প্রশ্ন বুঝছি…',offline:'লাইভ AI নেই, অ্যাপ গাইড উত্তর দিচ্ছে।',start:'কীভাবে সাহায্য করব?',quick:'এগুলো জিজ্ঞাসা করুন',review:'সংরক্ষণের আগে যাচাই করুন',record:'দৈনিক হিসাবে সংরক্ষণ',invoice:'রসিদের খসড়া',voice:'হিন্দিতে বলুন',voiceOff:'শোনা বন্ধ করুন',read:'উত্তর শুনুন',cancel:'খসড়া মুছুন',hint:'নগদ নির্বাচিত আছে। UPI/ব্যাংক হলে বদলান।',item:'পণ্য / কারণ',quantity:'পরিমাণ',amount:'টাকার পরিমাণ (₹)',method:'পেমেন্ট পদ্ধতি',print:'রসিদ প্রিন্ট',edit:'সব তথ্য যাচাই করুন। স্টক নিজে কমবে না।',saved:'দৈনিক হিসাবে সংরক্ষিত।',unsup:'এই ব্রাউজারে ভয়েস লেখা নেই। টাইপ করুন।',noMic:'মাইক্রোফোন চালু হয়নি। অনুমতি দিন বা লিখুন।',voiceData:'ভয়েস ব্রাউজারের স্বীকৃতি সেবায় যেতে পারে। PIN বলবেন না।',demo:'ডেমো — কাল্পনিক তথ্য।'}
+};
+export function AIFinancialCoachView({onNavigate,initialQuery,merchant}:{merchant:Merchant|null;onNavigate:(p:NavPath)=>void;language:Language;onLanguageChange:(l:Language)=>void;initialQuery?:string}){
+ const {language}=useLanguage(),t=texts[language],copy=saathiCopy(language);
+ const {user}=useAuth(),shop=useShop();
+ const [messages,setMessages]=useState<Msg[]>([]);
+ const [question,setQuestion]=useState(''),[loading,setLoading]=useState(false);
+ const [personal,setPersonal]=useState(false),[mode,setMode]=useState<'checking'|'live'|'guide'>(shop.demo?'guide':'checking');
+ const [warning,setWarning]=useState(''),[voicePhase,setVoicePhase]=useState<'idle'|'starting'|'listening'>('idle');
+ const [voiceProblem,setVoiceProblem]=useState<VoiceProblem>('none'),[micResult,setMicResult]=useState<MicDiagnostic|null>(null),[testingMic,setTestingMic]=useState(false);
+ const [localMode,setLocalMode]=useState(()=>isBrave()),[localPhase,setLocalPhase]=useState<'idle'|'starting'|'recording'|'transcribing'>('idle');
+ const [localProgress,setLocalProgress]=useState<LocalProgress|null>(null);
+ const [voiceReview,setVoiceReview]=useState<{text:string;uncertain:boolean}|null>(null);
+ const [voiceLang,setVoiceLang]=useState<'hi-IN'|'en-IN'|'bn-IN'>(language==='bn'?'bn-IN':'hi-IN');
+ const [readReplies,setReadReplies]=useState(false);
+ const [draft,setDraft]=useState<VoiceDraft|null>(null),[recorded,setRecorded]=useState(false),[saving,setSaving]=useState(false),[savedMessage,setSavedMessage]=useState('');
+ const tail=useRef<HTMLDivElement>(null),questionInput=useRef<HTMLTextAreaElement>(null),listener=useRef<SpeechListener|null>(null);
+ const listeningTimeout=useRef<ReturnType<typeof setTimeout>|null>(null);
+ const localRecorder=useRef<LocalRecorder|null>(null),localTimer=useRef<ReturnType<typeof setTimeout>|null>(null),localActive=useRef(false);
+ const askRef=useRef<(q:string)=>Promise<void>>(async()=>{});
+ const retryAt=useRef(0);
+ const snapshot={entries:shop.entries,dues:shop.dues,stock:shop.stock,contacts:shop.contacts,isDemo:shop.demo};
+ const addAgent=(reply:string,route:SaathiRoute='none',origin:'live'|'guide'='guide')=>{
+  setMessages(list=>[...list,{id:uid(),role:'assistant',text:reply,route,mode:origin}]);
+  if(readReplies){const lang=voiceLang;speak(reply,lang)}
+ };
+ useEffect(()=>{tail.current?.scrollIntoView({behavior:'smooth',block:'nearest'})},[messages,loading,draft]);
+ useEffect(()=>{if(initialQuery?.trim())setQuestion(initialQuery.trim())},[initialQuery]);
+ useEffect(()=>{if(shop.demo||!user)setMode('guide')},[shop.demo,user]);
+ useEffect(()=>()=>{listener.current?.abort();listener.current=null;if(listeningTimeout.current)clearTimeout(listeningTimeout.current);if(localTimer.current)clearTimeout(localTimer.current);localRecorder.current?.cancel();localActive.current=false;stopSpeech()},[]);
+ const clear=()=>{if(loading||saving)return;setMessages([]);setWarning('');setVoiceReview(null);setDraft(null);setRecorded(false);setSavedMessage('');stopSpeech()};
+ const ask=async(text:string)=>{
+  const q=text.trim().slice(0,1000);
+  if(!q||loading||saving)return;
+  setQuestion('');setVoiceReview(null);setWarning('');setSavedMessage('');stopSpeech();
+  const prior=messages.slice(-8).map(m=>({role:m.role,text:m.text}));
+  setMessages(list=>[...list,{id:uid(),role:'user',text:q}]);
+  const voiceDraft=parseVoiceCommand(q);
+  const isFollowup=draft&&!voiceDraft&&q.length<120&&
+    (/[₹\d०-९]/.test(q)||/\b(?:cash|upi|bank|rs)\b|नकद|कैश|रुपये|रुपए|किलो|लीटर|पीस|হাতে|টাকা/i.test(q))&&
+    !/\b(?:what|how|why|kitna|kitni|kya|kahan)\b|कितन|क्या|कैसे|কত|কেন/iu.test(q);
+  if(isFollowup){
+    const inferred=parseVoiceCommand((draft.intent==='invoice'?'invoice banado ':draft.intent==='expense'?'aaj ':'aaj ')+q+(draft.intent==='expense'?' kharch':draft.intent==='sale'?' beche':''));
+    if(inferred&&(inferred.amount!==null||inferred.quantity!==null||inferred.method!==draft.method)){
+      setDraft(old=>old?{...old,
+        amount:inferred.amount??old.amount,
+        quantity:inferred.quantity??old.quantity,
+        unit:inferred.unit??old.unit,
+        item:inferred.item||old.item,
+        method:inferred.method==='Cash'&&old.method!=='Cash'&&!/\bcash\b|नकद|कैश/i.test(q)?old.method:inferred.method
+      }:null);
+      setRecorded(false);
+      addAgent(language==='hi'?'मैंने उसी ड्राफ्ट में नई जानकारी भर दी है। नीचे जाँचें।':language==='bn'?'একই খসড়ায় নতুন তথ্য যোগ করেছি। যাচাই করুন।':'Updated the same draft with your new details. Please review before saving.');
       return;
     }
-
-    if (isAudioPlaying) {
-      window.speechSynthesis.cancel();
-      setIsAudioPlaying(false);
-    } else {
-      const textToSpeak =
-        language === 'hi'
-          ? 'नमस्ते रमेश जी! आपका स्कोर अठहत्तर है क्योंकि आपके पास स्थिर नकद प्रवाह है। तीस दिनों का बैकअप बनाने पर स्कोर पचासी प्लस हो सकता है।'
-          : 'Namaste Ramesh ji! Your score is 78 because your business has stable inflows and regular transaction activity. Building a 30-day cash buffer unlocks a score of 85+ and lowers interest rates.';
-
-      const utterance = new SpeechSynthesisUtterance(textToSpeak);
-      utterance.lang = language === 'hi' ? 'hi-IN' : 'en-IN';
-      utterance.onend = () => setIsAudioPlaying(false);
-      utterance.onerror = () => setIsAudioPlaying(false);
-      setIsAudioPlaying(true);
-      window.speechSynthesis.speak(utterance);
-    }
+  }
+  if(voiceDraft){
+    setDraft(voiceDraft);setRecorded(false);
+    addAgent(language==='hi'?'मैंने सुना और ड्राफ्ट तैयार किया है। नीचे रकम और सामान जाँचें, फिर सेव करें।':language==='bn'?'আপনার কথা থেকে খসড়া তৈরি করেছি। যাচাই করে সংরক্ষণ করুন।':'I prepared a draft from your words. Review its details below; nothing is saved until you confirm.');
+    return;
+  }
+  setLoading(true);
+  if(shop.demo||!user||Date.now()<retryAt.current){
+   const out=saathiGuide(q,language,snapshot);addAgent(out.answer,out.route);setMode('guide');setLoading(false);return;
+  }
+  try{
+   const {data,error}=await supabase.functions.invoke('vyapartrust-saathi',{body:{message:q,history:prior,language,includeShopData:personal}});
+   if(error||!data||typeof data.reply!=='string')throw Error('AI unavailable');
+   const route:SaathiRoute=typeof data.route==='string'&&availableRoutes.has(data.route)?data.route as NavPath:'none';
+   addAgent(data.reply.slice(0,1700),route,'live');setMode('live');
+  }catch{
+   const out=saathiGuide(q,language,snapshot);addAgent(out.answer,out.route);
+   retryAt.current=Date.now()+90_000;setMode('guide');setWarning(t.offline);
+  }finally{setLoading(false)}
+ };
+ askRef.current=ask;
+ const clearListeningTimer=()=>{if(listeningTimeout.current){clearTimeout(listeningTimeout.current);listeningTimeout.current=null}};
+ const stopListening=()=>{
+  const recognizer=listener.current;listener.current=null;clearListeningTimer();
+  if(recognizer){try{recognizer.abort()}catch{/* may already have stopped */}}
+  setVoicePhase('idle');
+ };
+ const showVoiceError=(problem:VoiceProblem,code:string)=>{
+  setVoiceProblem(problem);
+  const desc=describeVoiceProblem(problem,language,isBrave());
+  setWarning(desc+(code?' ['+code+']':''));
+ };
+ const checkMicrophone=async()=>{
+  if(testingMic||voicePhase!=='idle'||localPhase!=='idle')return;
+  setTestingMic(true);setWarning('');setMicResult(null);
+  const result=await testMicrophone();
+  setMicResult(result);setTestingMic(false);
+  if(!result.ok)showVoiceError(result.problem,result.details);
+  else{setVoiceProblem('none');setWarning(language==='hi'?'माइक की अनुमति मिल गई। अब “हिंदी में बोलें” दबाएँ। अगर Brave में आवाज़ नहीं पहचानी जाए तो Edge खोलें।':language==='bn'?'মাইক্রোফোন কাজ করছে। এবার কথা বলুন। Brave-এ না হলে Edge ব্যবহার করুন।':'Microphone works. Tap Speak to try speech recognition. If Brave still fails, open this page in Edge.');}
+ };
+ const receiveSpeech=(raw:string)=>{
+  const review=reviewTranscript(raw,voiceLang);
+  setQuestion('');
+  if(review.quality==='empty'){
+   setVoiceReview(null);
+   setWarning(language==='hi'?'आवाज़ साफ़ नहीं समझी। थोड़ा पास आकर दोबारा बोलें।':'I could not hear clear words. Please try again.');
+   return;
+  }
+  setVoiceReview({text:review.transcript,uncertain:review.quality!=='clear'});
+  setWarning('');
+ };
+ const applyVoiceReview=()=>{
+  if(!voiceReview||!voiceReview.text.trim())return;
+  const cleaned=voiceReview.text.trim();
+  setVoiceReview(null);
+  void askRef.current(cleaned);
+ };
+ const stopLocal=async()=>{
+  if(!localRecorder.current||localPhase==='transcribing')return;
+  const recording=localRecorder.current;
+  localRecorder.current=null;
+  if(localTimer.current){clearTimeout(localTimer.current);localTimer.current=null}
+  setLocalPhase('transcribing');setLocalProgress({message:language==='hi'?'आवाज़ पहचान रहे हैं…':'Preparing audio for local transcription'});
+  try{
+   const pcm=await recording.stop();
+   if(!localActive.current)return;
+   const quality=voiceActivitySummary(pcm);
+   if(!audioIsClearEnough(quality))throw Error('Too quiet or unclear. Speak for 2–8 seconds near the microphone and try again.');
+   const result=await transcribeLocally(pcm,voiceLang,progress=>{if(localActive.current)setLocalProgress(progress)});
+   if(!localActive.current)return;
+   receiveSpeech(result);
+   setLocalProgress(null);
+  }catch(e){
+   const explanation=e instanceof Error?e.message:'Offline voice recognition failed';
+   setWarning((language==='hi'?'ऑफ़लाइन आवाज़ पहचान नहीं हो पाई: ':'Offline transcription failed: ')+explanation+
+    (language==='hi'?' · Windows में Win + H से भी बोल सकते हैं।':' · Windows Win + H is another option.'));
+   setLocalProgress(null);
+  }finally{setLocalPhase('idle')}
+ };
+ const startLocal=async()=>{
+  if(localPhase!=='idle'||loading||saving)return;
+  if(!localMicSupported()){showVoiceError('unsupported','local-audio-capture-not-supported');return}
+  stopSpeech();setVoiceReview(null);setVoiceProblem('none');setWarning('');setMicResult(null);setLocalProgress(null);
+  setLocalPhase('starting');localActive.current=true;
+  try{
+   const rec=await beginLocalRecording();
+   if(!localActive.current){rec.cancel();return}
+   localRecorder.current=rec;setLocalPhase('recording');
+   localTimer.current=setTimeout(()=>void stopLocalRef.current(),localRecordingLimitMs);
+  }catch(e){
+   const code=e instanceof Error?e.name:'recording-error';
+   showVoiceError(classifySpeechError(code),code);
+   setLocalPhase('idle');
+  }
+ };
+ const stopLocalRef=useRef<()=>Promise<void>>(async()=>{});
+ stopLocalRef.current=stopLocal;
+ const cancelLocal=()=>{
+  localActive.current=false;localRecorder.current?.cancel();localRecorder.current=null;
+  if(localTimer.current){clearTimeout(localTimer.current);localTimer.current=null}
+  setLocalPhase('idle');setLocalProgress(null);
+ };
+ const toggleListen=()=>{
+  if(localMode){
+   if(localPhase==='idle'){void startLocal();return}
+   if(localPhase==='recording'){void stopLocal();return}
+   return;
+  }
+  if(voicePhase!=='idle'){stopListening();return}
+  if(!voiceIsSecure()){showVoiceError('insecure','insecure-context');return}
+  if(!voiceAvailable()){setLocalMode(true);void startLocal();return}
+  const recognition=createListener();
+  if(!recognition){showVoiceError('unsupported','recognizer-unavailable');return}
+  stopSpeech();setWarning('');setVoiceProblem('none');
+  setMicResult(null);listener.current=recognition;
+  recognition.lang=voiceLang;recognition.interimResults=false;recognition.continuous=false;
+  let recognized=false,failed=false;
+  const armSpeechTimeout=(ms:number,code:string)=>{
+   clearListeningTimer();
+   listeningTimeout.current=setTimeout(()=>{
+    if(listener.current!==recognition)return;
+    stopListening();showVoiceError(isBrave()?'speech-service':'no-speech',code);
+   },ms);
   };
-
-  return (
-    <div className="flex flex-col w-full gap-6">
-      {/* Merchant Identity & Real-time Analytical Telemetry Bar */}
-      <section className="bg-white rounded-xl p-4 shadow-xs border border-[#bccac0]/20 flex flex-col xl:flex-row xl:items-center justify-between gap-4">
-        <div className="flex items-center gap-4">
-          <div className="relative shrink-0">
-            <div className="w-14 h-14 rounded-xl bg-[#e2e7ff] flex items-center justify-center text-[#006948]">
-              <span className="material-symbols-outlined text-[32px]">storefront</span>
-            </div>
-            <span className="absolute -bottom-1 -right-1 w-4 h-4 rounded-full bg-[#00855d] flex items-center justify-center ring-2 ring-white">
-              <span className="material-symbols-outlined text-[10px] text-white">check</span>
-            </span>
-          </div>
-
-          <div>
-            <div className="flex flex-wrap items-center gap-2">
-              <h2 className="text-[20px] font-bold text-[#131b2e]">
-                {merchant?.storeName || 'Ramesh General Store'}
-              </h2>
-              <span className="px-2 py-0.5 rounded-full bg-[#e2e7ff] text-[#3d4a42] text-[11px] font-semibold">
-                Jaipur, RJ
-              </span>
-              <span className="px-2.5 py-0.5 rounded-full bg-[#85f8c4] text-[#002114] text-[11px] font-bold flex items-center gap-1">
-                <span className="material-symbols-outlined text-[13px]">verified</span> Consented MSME Identity
-              </span>
-            </div>
-            <p className="text-[13px] text-[#3d4a42]">
-              Sovereign Financial Passport ID: <span className="font-mono text-[#131b2e] font-semibold">{merchant?.passportUid || 'IND-RJ-JAI-9941'}</span> • Last Live AA Sync: Today, 08:30 AM
-            </p>
-          </div>
-        </div>
-
-        {/* Telemetry Badges Strip */}
-        <div className="flex flex-wrap items-center gap-2 xl:gap-3">
-          <div className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-[#f2f3ff]">
-            <span className="material-symbols-outlined text-[#006948] text-[18px]">favorite</span>
-            <div className="flex flex-col">
-              <span className="text-[10px] text-[#3d4a42] font-semibold">Health Index</span>
-              <span className="text-[15px] text-[#006948] font-bold">78 / 100</span>
-            </div>
-          </div>
-
-          <div className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-[#ffdcc3] text-[#2f1500]">
-            <span className="material-symbols-outlined text-[18px]">flag</span>
-            <div className="flex flex-col">
-              <span className="text-[10px] font-semibold">Safety Check</span>
-              <span className="text-[15px] font-bold">2 Flagged</span>
-            </div>
-          </div>
-
-          <div className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-[#f2f3ff]">
-            <span className="material-symbols-outlined text-[#006a61] text-[18px]">hourglass_top</span>
-            <div className="flex flex-col">
-              <span className="text-[10px] text-[#3d4a42] font-semibold">Cash Buffer</span>
-              <span className="text-[15px] text-[#131b2e] font-bold">18 Days</span>
-            </div>
-          </div>
-
-          <div className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-[#f2f3ff]">
-            <span className="material-symbols-outlined text-[#6d7a72] text-[18px]">account_balance_wallet</span>
-            <div className="flex flex-col">
-              <span className="text-[10px] text-[#3d4a42] font-semibold">Est. Credit Line</span>
-              <span className="text-[15px] text-[#131b2e] font-bold">₹50k - ₹1.0L</span>
-            </div>
-          </div>
-
-          <div className="flex items-center p-1 rounded-full bg-[#e2e7ff] ml-auto xl:ml-0">
-            <button
-              onClick={() => onLanguageChange('en')}
-              className={`px-2.5 py-1 rounded-full text-[11px] font-bold cursor-pointer ${
-                language === 'en' ? 'bg-white text-[#131b2e] shadow-xs' : 'text-[#3d4a42]'
-              }`}
-            >
-              English
-            </button>
-            <button
-              onClick={() => onLanguageChange('hi')}
-              className={`px-2.5 py-1 rounded-full text-[11px] font-bold cursor-pointer ${
-                language === 'hi' ? 'bg-white text-[#131b2e] shadow-xs' : 'text-[#3d4a42]'
-              }`}
-            >
-              हिंदी
-            </button>
-            <button
-              onClick={() => onLanguageChange('bn')}
-              className={`px-2.5 py-1 rounded-full text-[11px] font-bold cursor-pointer ${
-                language === 'bn' ? 'bg-white text-[#131b2e] shadow-xs' : 'text-[#3d4a42]'
-              }`}
-            >
-              বাংলা
-            </button>
-          </div>
-
-          {/* Gemini Live Voice Mode Button */}
-          <button
-            onClick={() => setShowLiveVoiceModal(true)}
-            className="flex items-center gap-2 px-3.5 py-1.5 rounded-full bg-gradient-to-r from-[#006948] to-[#00855d] text-white text-[12px] font-bold shadow-sm hover:from-[#00855d] hover:to-[#006948] transition-all cursor-pointer group shrink-0"
-          >
-            <span className="w-2 h-2 rounded-full bg-[#85f8c4] animate-ping" />
-            <span className="material-symbols-outlined text-[17px] text-[#85f8c4]">graphic_eq</span>
-            <span>Gemini Live Voice</span>
-          </button>
-        </div>
-      </section>
-
-      {/* Page Header Title & Subtitle */}
-      <div className="flex flex-col md:flex-row md:items-end justify-between gap-2">
-        <div>
-          <div className="flex items-center gap-2 text-[#006948] text-[12px] font-bold mb-1">
-            <span className="material-symbols-outlined text-[18px]">smart_toy</span>
-            <span>AGENTIC UNDERWRITING ADVISORY</span>
-          </div>
-          <h1 className="text-[28px] font-bold text-[#131b2e] tracking-tight">
-            Your Personal Financial Coach for Business
-          </h1>
-          <p className="text-[14px] text-[#3d4a42]">
-            Conversational, explainable guidance powered by your consented financial identity. Tailored for Indian micro-merchants.
-          </p>
-        </div>
-
-        <button
-          onClick={handleSpeechToggle}
-          className={`shrink-0 flex items-center gap-2 px-4 py-2 rounded-full transition-all shadow-xs cursor-pointer ${
-            isAudioPlaying
-              ? 'bg-[#ba1a1a] text-white animate-pulse'
-              : 'bg-[#89f5e7] text-[#00201d] hover:bg-[#6bd8cb]'
-          }`}
-        >
-          <span className="material-symbols-outlined text-[20px]">
-            {isAudioPlaying ? 'volume_off' : 'volume_up'}
-          </span>
-          <span className="text-[12px] font-bold">
-            {isAudioPlaying ? 'Stop Audio (रोकें)' : 'Listen in Hindi (ऑडियो सुनें)'}
-          </span>
-        </button>
-      </div>
-
-      {/* Primary Workspace: Split 2-Column Mesh Grid */}
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
-        {/* Left & Center Conversational Chamber (8 Cols) */}
-        <div className="lg:col-span-8 flex flex-col gap-4">
-          <div className="bg-white rounded-xl p-4 md:p-6 shadow-xs border border-[#bccac0]/20 flex flex-col gap-6 min-h-[500px]">
-            {/* AI Coach Initial Salutation Card */}
-            <div className="flex items-start gap-4">
-              <div className="w-10 h-10 rounded-full bg-[#85f8c4] text-[#002114] flex items-center justify-center shrink-0 shadow-xs">
-                <span className="material-symbols-outlined text-[20px]">assistant</span>
-              </div>
-              <div className="flex flex-col gap-2 max-w-2xl">
-                <div className="flex items-center gap-2">
-                  <span className="text-[15px] font-bold text-[#131b2e]">Vyapar AI Coach</span>
-                  <span className="px-2 py-0.5 rounded-full bg-[#eaedff] text-[11px] font-semibold text-[#3d4a42]">
-                    Live Model 4.2
-                  </span>
-                  <span className="text-[11px] text-[#6d7a72]">08:31 AM</span>
-                </div>
-                <div className="p-4 rounded-2xl rounded-tl-xs bg-[#f2f3ff] text-[#131b2e] shadow-xs">
-                  <p className="text-[14px] leading-relaxed">
-                    <span className="font-bold text-[#006948]">Namaste Ramesh ji!</span> I've analyzed your store's last 90 days of transactions. Your inflows are healthy at <strong className="font-semibold text-[#131b2e]">₹1.6L/month</strong>, but you have 2 pending transaction flags and your liquid cash reserve could be strengthened. What would you like to explore today?
-                  </p>
-                  <div className="mt-3 pt-2 flex items-center gap-2 text-[#3d4a42] text-[12px] border-t border-[#bccac0]/20">
-                    <span className="material-symbols-outlined text-[15px] text-[#006948]">translate</span>
-                    <span>नमस्ते रमेश जी! आपके स्टोर के पिछले 90 दिनों के लेनदेन का विश्लेषण किया गया है।</span>
-                  </div>
-                </div>
-              </div>
-            </div>
-
-            {/* Default Example Exchange */}
-            <div className="flex items-start justify-end gap-4">
-              <div className="flex flex-col items-end gap-1 max-w-lg">
-                <div className="flex items-center gap-2">
-                  <span className="text-[11px] text-[#6d7a72]">08:34 AM</span>
-                  <span className="text-[14px] font-bold text-[#131b2e]">Ramesh Kumar</span>
-                </div>
-                <div className="p-4 rounded-2xl rounded-tr-xs bg-[#006948] text-white shadow-xs">
-                  <p className="text-[14px] font-medium">Why is my financial health score 78?</p>
-                </div>
-              </div>
-              <img
-                src="https://lh3.googleusercontent.com/aida-public/AB6AXuAnRvbWBqnUv3MmVOGBf4O6CmK2xl-7kQY8IEXNBLxTVKSTMYT6325BeUSOaLsKBz7OlOCren3xffRlfrGXiM8hM1RaIYDMYxE2WThgKCc4I0KsN1C_nMU_nnpzSs02TIP2TA7I-sEYZ07nTxlQvvqX5jhupxZ1GSJjvcDH40c6a_XzIqbB4GqeLzV2GohTVrlpZ4oQux9keg6WxFBym_ZsC-GsSQoANRY1UWytoN2X3RaqzJ5OvjtXcg"
-                alt="Ramesh Kumar"
-                className="w-10 h-10 rounded-full object-cover shrink-0 ring-2 ring-[#85f8c4]"
-              />
-            </div>
-
-            {/* AI Deep Explainability Breakdown Card */}
-            <div className="flex items-start gap-4">
-              <div className="w-10 h-10 rounded-full bg-[#85f8c4] text-[#002114] flex items-center justify-center shrink-0 shadow-xs">
-                <span className="material-symbols-outlined text-[20px]">assistant</span>
-              </div>
-              <div className="flex flex-col gap-3 w-full">
-                <div className="flex items-center gap-2">
-                  <span className="text-[15px] font-bold text-[#131b2e]">Vyapar AI Coach</span>
-                  <span className="px-2 py-0.5 rounded-full bg-[#85f8c4] text-[#002114] text-[11px] font-bold">
-                    Verified Breakdown
-                  </span>
-                  <span className="text-[11px] text-[#6d7a72]">08:34 AM</span>
-                </div>
-
-                <div className="p-4 md:p-6 rounded-2xl rounded-tl-xs bg-[#f2f3ff] shadow-xs flex flex-col gap-4">
-                  <p className="text-[14px] text-[#131b2e] leading-relaxed">
-                    Your score is <strong className="text-[#006948] font-bold">78</strong> because your business has stable inflows and regular transaction activity. Your main opportunities are building a stronger cash reserve and reviewing two unusual transactions.
-                  </p>
-
-                  {/* Inline Visual Score Progression Bar */}
-                  <div className="p-4 rounded-xl bg-white flex flex-col gap-2 shadow-xs border border-[#bccac0]/20">
-                    <div className="flex items-center justify-between text-[11px]">
-                      <span className="text-[#3d4a42] font-semibold">Scoring Archetype: Daily Essentials Retail</span>
-                      <span className="text-[#006948] font-bold">Score 78 / 100 • Grade A-</span>
-                    </div>
-                    <div className="w-full h-3 rounded-full bg-[#eaedff] overflow-hidden flex">
-                      <div className="h-full bg-[#006948] transition-all" style={{ width: '78%' }}></div>
-                      <div className="h-full bg-[#ffdcc3] transition-all" style={{ width: '14%' }}></div>
-                      <div className="h-full bg-[#d2d9f4] transition-all" style={{ width: '8%' }}></div>
-                    </div>
-                    <div className="flex items-center justify-between text-[11px] text-[#6d7a72]">
-                      <span>Base Threshold: 50</span>
-                      <span>Target for Mudra Fast-Track: 85+</span>
-                    </div>
-                  </div>
-
-                  {/* Mathematical Deductions Breakdown */}
-                  <div className="flex flex-col gap-2">
-                    <span className="text-[11px] font-bold text-[#3d4a42] uppercase tracking-wider">
-                      EXACT MATHEMATICAL ATTRIBUTION
-                    </span>
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
-                      <div className="p-3 rounded-lg bg-white flex items-start gap-3 shadow-xs border border-[#bccac0]/20">
-                        <span className="w-6 h-6 rounded-md bg-[#85f8c4] text-[#002114] flex items-center justify-center shrink-0 text-[11px] font-bold">
-                          +45
-                        </span>
-                        <div className="flex flex-col">
-                          <span className="text-[13px] font-bold text-[#131b2e]">Daily UPI Velocity</span>
-                          <span className="text-[11px] text-[#3d4a42]">₹5.2k avg daily retail customer settlements</span>
-                        </div>
-                      </div>
-
-                      <div className="p-3 rounded-lg bg-white flex items-start gap-3 shadow-xs border border-[#bccac0]/20">
-                        <span className="w-6 h-6 rounded-md bg-[#85f8c4] text-[#002114] flex items-center justify-center shrink-0 text-[11px] font-bold">
-                          +22
-                        </span>
-                        <div className="flex flex-col">
-                          <span className="text-[13px] font-bold text-[#131b2e]">Supplier Discipline</span>
-                          <span className="text-[11px] text-[#3d4a42]">Zero delayed distributor payouts over 90 days</span>
-                        </div>
-                      </div>
-
-                      <div className="p-3 rounded-lg bg-white flex items-start gap-3 shadow-xs border border-[#bccac0]/20">
-                        <span className="w-6 h-6 rounded-md bg-[#ffdcc3] text-[#2f1500] flex items-center justify-center shrink-0 text-[11px] font-bold">
-                          -8
-                        </span>
-                        <div className="flex flex-col">
-                          <span className="text-[13px] font-bold text-[#131b2e]">Liquid Cash Reserve</span>
-                          <span className="text-[11px] text-[#3d4a42]">Covers only 18 days (Benchmark: 30 days safe)</span>
-                        </div>
-                      </div>
-
-                      <div className="p-3 rounded-lg bg-white flex items-start gap-3 shadow-xs border border-[#bccac0]/20">
-                        <span className="w-6 h-6 rounded-md bg-[#ffdad6] text-[#93000a] flex items-center justify-center shrink-0 text-[11px] font-bold">
-                          -6
-                        </span>
-                        <div className="flex flex-col">
-                          <span className="text-[13px] font-bold text-[#131b2e]">Unverified High Value</span>
-                          <span className="text-[11px] text-[#3d4a42]">2 transactions pending invoice or buyer match</span>
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* Interactive CTAs */}
-                  <div className="flex flex-wrap items-center gap-3 pt-1">
-                    <button
-                      onClick={() => onNavigate('transaction-safety')}
-                      className="flex items-center gap-2 px-4 py-2 rounded-lg bg-[#006948] text-white hover:bg-[#00855d] text-[12px] font-semibold transition-all shadow-xs cursor-pointer"
-                    >
-                      <span>Review 2 Flagged Transactions</span>
-                      <span className="material-symbols-outlined text-[16px]">arrow_forward</span>
-                    </button>
-                    <button
-                      onClick={() => onNavigate('credit-readiness')}
-                      className="flex items-center gap-2 px-4 py-2 rounded-lg bg-[#e2e7ff] text-[#131b2e] hover:bg-[#dae2fd] text-[12px] font-semibold transition-all cursor-pointer"
-                    >
-                      <span className="material-symbols-outlined text-[16px]">tune</span>
-                      <span>Simulate Emergency Reserve</span>
-                    </button>
-                  </div>
-
-                  {/* Hindi Transliteration Cardlet */}
-                  <div className="p-3 rounded-lg bg-[#eaedff] flex items-center gap-2 text-[#3d4a42] text-[11px]">
-                    <span className="material-symbols-outlined text-[16px] text-[#8d4b00]">info</span>
-                    <span>आपका स्कोर 78 है क्योंकि आपके पास स्थिर नकद प्रवाह है। 30 दिनों का बैकअप बनाने पर स्कोर 85+ हो सकता है।</span>
-                  </div>
-                </div>
-              </div>
-            </div>
-
-            {/* Dynamic Conversation Bubbles */}
-            {messages.map((msg) => (
-              <div
-                key={msg.id}
-                className={`flex items-start gap-4 ${msg.sender === 'user' ? 'justify-end' : 'justify-start'}`}
-              >
-                {msg.sender === 'ai' && (
-                  <div className="w-10 h-10 rounded-full bg-[#85f8c4] text-[#002114] flex items-center justify-center shrink-0 shadow-xs">
-                    <span className="material-symbols-outlined text-[20px]">assistant</span>
-                  </div>
-                )}
-                <div className={`flex flex-col max-w-xl ${msg.sender === 'user' ? 'items-end' : 'items-start'}`}>
-                  <div className="flex items-center gap-2 mb-1">
-                    <span className="text-[12px] font-semibold text-[#131b2e]">
-                      {msg.sender === 'user' ? 'Ramesh Kumar' : 'Vyapar AI Coach'}
-                    </span>
-                    <span className="text-[10px] text-[#6d7a72]">{msg.timestamp}</span>
-                  </div>
-                  <div
-                    className={`p-4 rounded-2xl text-[14px] shadow-xs leading-relaxed ${
-                      msg.sender === 'user'
-                        ? 'bg-[#006948] text-white rounded-tr-xs'
-                        : 'bg-[#f2f3ff] text-[#131b2e] rounded-tl-xs whitespace-pre-line'
-                    }`}
-                  >
-                    {msg.text}
-                  </div>
-                </div>
-                {msg.sender === 'user' && (
-                  <img
-                    src="https://lh3.googleusercontent.com/aida-public/AB6AXuAnRvbWBqnUv3MmVOGBf4O6CmK2xl-7kQY8IEXNBLxTVKSTMYT6325BeUSOaLsKBz7OlOCren3xffRlfrGXiM8hM1RaIYDMYxE2WThgKCc4I0KsN1C_nMU_nnpzSs02TIP2TA7I-sEYZ07nTxlQvvqX5jhupxZ1GSJjvcDH40c6a_XzIqbB4GqeLzV2GohTVrlpZ4oQux9keg6WxFBym_ZsC-GsSQoANRY1UWytoN2X3RaqzJ5OvjtXcg"
-                    alt="Ramesh Kumar"
-                    className="w-10 h-10 rounded-full object-cover shrink-0 ring-2 ring-[#85f8c4]"
-                  />
-                )}
-              </div>
-            ))}
-
-            {isTyping && (
-              <div className="flex items-center gap-3 text-[#3d4a42] text-[13px]">
-                <div className="w-8 h-8 rounded-full bg-[#85f8c4] flex items-center justify-center text-[#002114]">
-                  <span className="material-symbols-outlined text-[16px] animate-spin">sync</span>
-                </div>
-                <span>Vyapar AI Coach is analyzing 90-day telemetry and calculating cash-flow attribution...</span>
-              </div>
-            )}
-
-            <div ref={chatBottomRef} />
-          </div>
-
-          {/* Quick Prompts Chips */}
-          <div className="flex flex-col gap-2 pt-2">
-            <div className="flex items-center justify-between">
-              <span className="text-[11px] font-bold text-[#3d4a42] uppercase tracking-wider">
-                Merchant Quick Prompts • Tap to Ask
-              </span>
-              <span className="text-[11px] text-[#006948] flex items-center gap-1 font-semibold">
-                <span className="material-symbols-outlined text-[14px]">auto_awesome</span> Custom queries enabled
-              </span>
-            </div>
-            <div className="flex flex-wrap gap-2">
-              <button
-                onClick={() => handleSendMessage('Why is my score 78?')}
-                className="px-3 py-1.5 rounded-full bg-[#e2e7ff] hover:bg-[#eaedff] text-[#131b2e] text-[12px] font-semibold transition-all flex items-center gap-1.5 shadow-xs cursor-pointer"
-              >
-                <span className="material-symbols-outlined text-[16px] text-[#006948]">analytics</span>
-                <span>Why is my score 78?</span>
-              </button>
-              <button
-                onClick={() => handleSendMessage('How can I improve my credit readiness to ₹1,50,000?')}
-                className="px-3 py-1.5 rounded-full bg-[#e2e7ff] hover:bg-[#eaedff] text-[#131b2e] text-[12px] font-semibold transition-all flex items-center gap-1.5 shadow-xs cursor-pointer"
-              >
-                <span className="material-symbols-outlined text-[16px] text-[#006a61]">trending_up</span>
-                <span>How can I improve my credit readiness to ₹1,50,000?</span>
-              </button>
-              <button
-                onClick={() => handleSendMessage('Can my business handle a 20% drop in sales?')}
-                className="px-3 py-1.5 rounded-full bg-[#e2e7ff] hover:bg-[#eaedff] text-[#131b2e] text-[12px] font-semibold transition-all flex items-center gap-1.5 shadow-xs cursor-pointer"
-              >
-                <span className="material-symbols-outlined text-[16px] text-[#8d4b00]">crisis_alert</span>
-                <span>Can my business handle a 20% drop in sales?</span>
-              </button>
-              <button
-                onClick={() => handleSendMessage('Explain my unusual transactions.')}
-                className="px-3 py-1.5 rounded-full bg-[#e2e7ff] hover:bg-[#eaedff] text-[#131b2e] text-[12px] font-semibold transition-all flex items-center gap-1.5 shadow-xs cursor-pointer"
-              >
-                <span className="material-symbols-outlined text-[16px] text-[#ba1a1a]">gpp_maybe</span>
-                <span>Explain my unusual transactions.</span>
-              </button>
-              <button
-                onClick={() => handleSendMessage('How much emergency reserve should I maintain for my Jaipur store?')}
-                className="px-3 py-1.5 rounded-full bg-[#e2e7ff] hover:bg-[#eaedff] text-[#131b2e] text-[12px] font-semibold transition-all flex items-center gap-1.5 shadow-xs cursor-pointer"
-              >
-                <span className="material-symbols-outlined text-[16px] text-[#006948]">savings</span>
-                <span>How much emergency reserve should I maintain for my Jaipur store?</span>
-              </button>
-            </div>
-          </div>
-
-          {/* Chat Input Bar */}
-          <div className="relative pt-2">
-            <form
-              onSubmit={(e) => {
-                e.preventDefault();
-                handleSendMessage();
-              }}
-              className="flex items-center gap-2 p-2 rounded-xl bg-[#f2f3ff] focus-within:bg-white focus-within:shadow-md transition-all border border-[#bccac0]/30"
-            >
-              <button
-                type="button"
-                onClick={handleSpeechToggle}
-                className="p-2 text-[#3d4a42] hover:text-[#006948] rounded-lg transition-colors cursor-pointer"
-                title="Voice Input / Audio"
-              >
-                <span className="material-symbols-outlined text-[20px]">mic</span>
-              </button>
-              <input
-                type="text"
-                value={inputMessage}
-                onChange={(e) => setInputMessage(e.target.value)}
-                placeholder="Ask financial questions in English, Hindi, or Hinglish (e.g. 'Mera loan kaise approve hoga?')..."
-                className="w-full bg-transparent text-[#131b2e] placeholder:text-[#6d7a72] text-[14px] focus:outline-none px-2"
-              />
-              <button
-                type="button"
-                onClick={() => onNavigate('financial-passport')}
-                className="p-2 text-[#3d4a42] hover:text-[#006948] rounded-lg transition-colors cursor-pointer"
-                title="Attach GST or Bank Bill"
-              >
-                <span className="material-symbols-outlined text-[20px]">attach_file</span>
-              </button>
-              <button
-                type="submit"
-                disabled={isTyping || !inputMessage.trim()}
-                className="px-4 py-2 rounded-lg bg-[#006948] text-white hover:bg-[#00855d] disabled:opacity-50 text-[13px] font-semibold transition-all flex items-center gap-1 shrink-0 shadow-xs cursor-pointer"
-              >
-                <span>Send</span>
-                <span className="material-symbols-outlined text-[16px]">send</span>
-              </button>
-            </form>
-          </div>
-
-          {/* Governance & Disclaimer */}
-          <div className="p-4 rounded-xl bg-[#e2e7ff] text-[#3d4a42] flex items-start gap-3">
-            <span className="material-symbols-outlined text-[#6d7a72] text-[22px] shrink-0 mt-0.5">lock</span>
-            <div className="flex flex-col gap-1">
-              <span className="text-[12px] font-bold text-[#131b2e]">
-                Institutional Model Governance & Explainability Guarantee
-              </span>
-              <p className="text-[11px] leading-relaxed">
-                🔒 AI-generated insights are for informational purposes only. VyaparTrust is an MSME data and analysis orchestration platform and does not offer direct financial, credit underwriting, or investment advice. Always verify lending terms directly with your designated financial institution or accredited banking partner.
-              </p>
-            </div>
-          </div>
-        </div>
-
-        {/* Right Drawer: Coach Playbook (4 Cols) */}
-        <div className="lg:col-span-4 flex flex-col gap-6">
-          {/* Executive Recommendations Playbook */}
-          <div className="bg-white rounded-xl p-4 md:p-6 shadow-xs border border-[#bccac0]/20 flex flex-col gap-4">
-            <div className="flex items-center justify-between pb-2 border-b border-[#eaedff]">
-              <div className="flex items-center gap-2">
-                <span className="material-symbols-outlined text-[#006948] text-[20px]">verified</span>
-                <h3 className="text-[18px] font-bold text-[#131b2e]">Coach Playbook</h3>
-              </div>
-              <span className="px-2 py-0.5 rounded-full bg-[#85f8c4] text-[#002114] text-[11px] font-bold">
-                January 2026
-              </span>
-            </div>
-
-            <p className="text-[13px] text-[#3d4a42]">
-              Priority actions to lift Ramesh General Store from <strong>78</strong> to <strong>86</strong> within 45 operating days:
-            </p>
-
-            {/* Action 1 */}
-            <div className="p-4 rounded-xl bg-[#f2f3ff] flex flex-col gap-2 hover:bg-[#eaedff] transition-all">
-              <div className="flex items-center justify-between">
-                <span className="px-2 py-0.5 rounded-full bg-[#89f5e7] text-[#00201d] text-[11px] font-bold">
-                  Action 01
-                </span>
-                <span className="text-[11px] text-[#006948] font-bold">+5 Score Boost</span>
-              </div>
-              <p className="font-bold text-[#131b2e] text-[14px]">Daily Auto-Sweep Deposit</p>
-              <p className="text-[12px] text-[#3d4a42] leading-relaxed">
-                Set aside <strong className="text-[#131b2e]">₹500/day</strong> into an auto-sweep deposit account to reach a 30-day liquid operating buffer by March.
-              </p>
-              <div className="pt-1 flex items-center justify-between">
-                <span className="text-[11px] text-[#6d7a72]">Target: ₹45,000 buffer</span>
-                <button
-                  onClick={() => onNavigate('credit-readiness')}
-                  className="text-[#006948] text-[12px] font-bold hover:underline flex items-center gap-0.5 cursor-pointer"
-                >
-                  <span>Set Rule</span>
-                  <span className="material-symbols-outlined text-[14px]">arrow_forward</span>
-                </button>
-              </div>
-            </div>
-
-            {/* Action 2 */}
-            <div className="p-4 rounded-xl bg-[#f2f3ff] flex flex-col gap-2 hover:bg-[#eaedff] transition-all">
-              <div className="flex items-center justify-between">
-                <span className="px-2 py-0.5 rounded-full bg-[#ffdcc3] text-[#2f1500] text-[11px] font-bold">
-                  Action 02
-                </span>
-                <span className="text-[11px] text-[#8d4b00] font-bold">+4 Safety Index</span>
-              </div>
-              <p className="font-bold text-[#131b2e] text-[14px]">Resolve ₹48,900 Supplier Tag</p>
-              <p className="text-[12px] text-[#3d4a42] leading-relaxed">
-                Attach vendor tax invoice for the 12th Jan bulk FMCG transfer to clear anomaly flags with underwriter engines.
-              </p>
-              <div className="pt-1 flex items-center justify-between">
-                <span className="text-[11px] text-[#6d7a72]">Ref: TXN# 9081248</span>
-                <button
-                  onClick={() => onNavigate('transaction-safety')}
-                  className="text-[#8d4b00] text-[12px] font-bold hover:underline flex items-center gap-0.5 cursor-pointer"
-                >
-                  <span>Upload Bill</span>
-                  <span className="material-symbols-outlined text-[14px]">upload_file</span>
-                </button>
-              </div>
-            </div>
-
-            {/* Action 3 */}
-            <div className="p-4 rounded-xl bg-[#f2f3ff] flex flex-col gap-2 hover:bg-[#eaedff] transition-all">
-              <div className="flex items-center justify-between">
-                <span className="px-2 py-0.5 rounded-full bg-[#85f8c4] text-[#002114] text-[11px] font-bold">
-                  Action 03
-                </span>
-                <span className="text-[11px] text-[#006948] font-bold">Low Interest</span>
-              </div>
-              <p className="font-bold text-[#131b2e] text-[14px]">Pre-Qualify for MSME Mudra</p>
-              <p className="text-[12px] text-[#3d4a42] leading-relaxed">
-                Export your 78-score verified Financial Passport directly to State Bank of India or Bank of Baroda MSME desks.
-              </p>
-              <div className="pt-1 flex items-center justify-between">
-                <span className="text-[11px] text-[#6d7a72]">Eligible for ₹1.0L Shishu</span>
-                <button
-                  onClick={() => onNavigate('financial-passport')}
-                  className="text-[#006948] text-[12px] font-bold hover:underline flex items-center gap-0.5 cursor-pointer"
-                >
-                  <span>Export Core</span>
-                  <span className="material-symbols-outlined text-[14px]">file_download</span>
-                </button>
-              </div>
-            </div>
-          </div>
-
-          {/* Live Cash Buffer Sparkline */}
-          <div className="bg-white rounded-xl p-4 shadow-xs border border-[#bccac0]/20 flex flex-col gap-3">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-2">
-                <span className="material-symbols-outlined text-[#006a61] text-[20px]">timelapse</span>
-                <span className="text-[15px] font-bold text-[#131b2e]">30-Day Liquidity Trajectory</span>
-              </div>
-              <span className="text-[11px] text-[#3d4a42] font-semibold">Live Projections</span>
-            </div>
-
-            <div className="w-full bg-[#f2f3ff] rounded-lg p-3 flex flex-col gap-2">
-              <div className="flex items-end justify-between">
-                <div>
-                  <span className="text-[22px] font-bold text-[#131b2e] tabular-nums">₹28,400</span>
-                  <span className="text-[11px] text-[#3d4a42] ml-1">Current liquid pool</span>
-                </div>
-                <span className="text-[11px] text-[#006a61] font-bold">18 of 30 Safe Days</span>
-              </div>
-
-              {/* Sparkline Graph */}
-              <svg className="w-full h-16 text-[#006948]" fill="none" viewBox="0 0 300 70">
-                <path
-                  d="M 0 55 Q 50 48, 100 42 T 200 30 T 300 15"
-                  stroke="currentColor"
-                  strokeLinecap="round"
-                  strokeWidth="2.5"
-                ></path>
-                <line
-                  stroke="currentColor"
-                  strokeDasharray="4 4"
-                  strokeOpacity="0.3"
-                  strokeWidth="1.5"
-                  x1="0"
-                  x2="300"
-                  y1="20"
-                  y2="20"
-                ></line>
-                <circle className="fill-white" cx="100" cy="42" r="3.5" stroke="currentColor" strokeWidth="2"></circle>
-                <circle className="fill-white" cx="200" cy="30" r="3.5" stroke="currentColor" strokeWidth="2"></circle>
-                <circle className="fill-[#006948]" cx="300" cy="15" r="4.5"></circle>
-              </svg>
-
-              <div className="flex items-center justify-between text-[10px] text-[#6d7a72] font-semibold">
-                <span>Today (18d buffer)</span>
-                <span>Target Day 45 (32d buffer)</span>
-              </div>
-            </div>
-
-            <p className="text-[11px] text-[#3d4a42]">
-              Consistent UPI settlement sweeping will insulate Ramesh General Store against seasonal supplier cost surges during the Holi festival cycle.
-            </p>
-          </div>
-
-          {/* Geo-Location Validated Card */}
-          <div className="bg-white rounded-xl p-4 shadow-xs border border-[#bccac0]/20 flex items-center gap-4">
-            <div className="w-20 h-20 rounded-lg overflow-hidden shrink-0 bg-[#f2f3ff]">
-              <img
-                src="https://lh3.googleusercontent.com/aida-public/AB6AXuDtKXtJQ5vm6V7cRNVcq7SpFRGAtJEjZizLUT1B_7UtjPUsakCp6zMyZM-vTxGfBFYU-o1jzez2_vVY6cTzQ3I3MMfd0TBC3YGwE3feJVYtT4-Ad6JaOJaISAa_enaF2_At8LZPVk10roklwIM8L1rRE0R0eHuC3qsQx3vo5vIjtMdTeupnWRnsI9qPFXKNc14Jbg_hy-qZdHjDfwkv4mgZdWp6CLgeyPyEDj8NaOay_aTDo7lix75bCQ"
-                alt="Storefront"
-                className="w-full h-full object-cover"
-              />
-            </div>
-            <div className="flex flex-col gap-0.5 min-w-0">
-              <div className="flex items-center gap-1 text-[#006948]">
-                <span className="material-symbols-outlined text-[16px]">location_on</span>
-                <span className="text-[11px] font-bold truncate">Johari Bazaar, Jaipur</span>
-              </div>
-              <span className="text-[14px] font-bold text-[#131b2e] truncate">Geo-Location Validated</span>
-              <p className="text-[11px] text-[#3d4a42] line-clamp-2">
-                Physical storefront geo-tag matches Udyam & GST registration records.
-              </p>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      {/* Gemini Live Conversational Voice Experience Modal */}
-      <GeminiLiveVoiceModal
-        isOpen={showLiveVoiceModal}
-        onClose={() => setShowLiveVoiceModal(false)}
-        merchant={merchant}
-        language={language}
-      />
+  recognition.onstart=()=>{if(listener.current===recognition){setVoicePhase('listening');armSpeechTimeout(18000,'recognition-result-timeout')}};
+  recognition.onaudiostart=()=>{if(listener.current===recognition){setVoicePhase('listening');armSpeechTimeout(18000,'recognition-result-timeout')}};
+  recognition.onresult=event=>{
+   if(listener.current!==recognition)return;
+   const spoken=Array.from(event.results).map(group=>group[0]?.transcript||'').join(' ').trim();
+   if(spoken){recognized=true;clearListeningTimer();receiveSpeech(spoken)}
+  };
+  recognition.onerror=e=>{
+   if(listener.current!==recognition)return;
+   failed=true;listener.current=null;clearListeningTimer();setVoicePhase('idle');
+   const problem=classifySpeechError(e.error);
+   if(problem==='network'||problem==='speech-service'){
+    setLocalMode(true);
+    setWarning((language==='hi'?'ब्राउज़र की आवाज़ सेवा उपलब्ध नहीं। Whisper चालू कर दिया है — माइक फिर दबाएँ।':'Browser speech service failed. Local Whisper is now enabled — press the microphone again.')+' ['+e.error+']');
+   }else if(problem!=='none')showVoiceError(problem,e.error);
+  };
+  recognition.onend=()=>{
+   if(listener.current!==recognition)return;
+   listener.current=null;clearListeningTimer();setVoicePhase('idle');
+   if(!recognized&&!failed)showVoiceError('no-speech','ended-without-result');
+  };
+  try{
+   setVoicePhase('starting');recognition.start();
+   // Brave and other Chromium builds can expose SpeechRecognition even when its
+   // backend never starts. Detect that separately from missing mic permission.
+   listeningTimeout.current=setTimeout(()=>{
+    if(listener.current!==recognition)return;
+    stopListening();showVoiceError('speech-service','recognition-start-timeout');
+   },8000);
+  }catch(e){
+   listener.current=null;clearListeningTimer();setVoicePhase('idle');
+   const code=e instanceof Error?e.name:'start-failed';
+   showVoiceError(classifySpeechError(code),code);
+  }
+ };
+ const focusWindowsDictation=()=>{
+  questionInput.current?.focus();
+  setWarning(language==='hi'?'टेक्स्ट बॉक्स चुन लिया। Windows पर Win + H दबाकर हिंदी में बोलें, फिर Send दबाएँ।':language==='bn'?'লেখার বক্সে ক্লিক করা হয়েছে। Windows-এ Win + H চাপুন, তারপর Send।':'Text field focused. On Windows, press Win + H, dictate, and then Send.');
+ };
+ const copyEdgeLink=async()=>{
+  try{await navigator.clipboard.writeText(window.location.href);setWarning(language==='hi'?'इस पेज का लिंक कॉपी हो गया। Microsoft Edge में पेस्ट करके खोलें।':language==='bn'?'লিংক কপি করা হয়েছে। Microsoft Edge-এ খুলুন।':'Link copied. Paste it into Microsoft Edge and try the microphone there.')}
+  catch{setWarning(language==='hi'?'पेज का पता कॉपी करके Microsoft Edge में खोलें।':'Copy the page address and open it in Microsoft Edge.')}
+ };
+ const updateDraft=<K extends keyof VoiceDraft>(key:K,value:VoiceDraft[K])=>{setDraft(old=>old?{...old,[key]:value}:null);setRecorded(false);setSavedMessage('')};
+ const canSave=draft&&Number.isFinite(draft.amount)&&draft.amount!==null&&draft.amount>0&&draft.amount<=10000000&&(draft.intent!=='invoice'||(!!draft.item.trim()&&draft.quantity!==null&&draft.quantity>0));
+ const saveDraft=async()=>{
+  if(!draft||!canSave||saving||recorded)return;
+  setSaving(true);setSavedMessage('');setWarning('');
+  const kind=draft.intent==='expense'?'expense':'sale';
+  const ok=await shop.add('entries',{entry_date:draft.day,kind,payment_method:draft.method,amount:Number(draft.amount),note:draftNote(draft),source:'manual',provider:null,provider_reference:null,payment_verified_at:null,matched_provider_entry_id:null});
+  setSaving(false);
+  if(ok){setRecorded(true);setSavedMessage(t.saved);addAgent(t.saved+' '+formatRupees(Number(draft.amount))+' · '+(draft.intent==='expense'?'expense':'sale')+'.', 'daily-hisaab');}
+  else setWarning(shop.error||'Could not save entry. Check your connection and try again.');
+ };
+ const voiceStatus=localMode?
+   localPhase==='starting'?(language==='hi'?'माइक की अनुमति ले रहे हैं…':'Requesting microphone…'):
+   localPhase==='recording'?(language==='hi'?'आवाज़ रिकॉर्ड हो रही है — रोककर लिखें':'Recording locally — press Stop to transcribe'):
+   localPhase==='transcribing'?(localProgress?.message||'Running local Whisper…'):
+   '' :
+   voicePhase==='starting'?(language==='hi'?'माइक शुरू हो रहा है…':'Starting microphone…'):voicePhase==='listening'?(language==='hi'?'सुन रहे हैं…':'Listening…'):'';
+ return <section className="saathi-page" aria-label="Dukaan Saathi chatbot">
+  <div className="saathi-hero">
+   <div className="saathi-icon" aria-hidden="true"><span className="material-symbols-outlined">support_agent</span><span className="saathi-icon-star">✳</span></div>
+   <div className="saathi-hero-copy"><span className="saathi-kicker">✦ VYAPARTRUST · VOICE & SHOP ASSISTANT</span><h2>{t.header}</h2><p>{t.sub}</p></div>
+   <span className={'saathi-mode '+(mode==='live'?'is-live':'')}>{mode==='live'?t.live:t.guide}</span>
+  </div>
+  <div className="saathi-layout">
+   <div className="saathi-main">
+    <div className="saathi-chat" role="log" aria-label="Chat messages" aria-live="polite" aria-relevant="additions">
+     {messages.length===0&&<div className="saathi-intro">
+       <span className="saathi-seal">सा</span><h3>{t.start}</h3>
+       <p>{copy.greet} {language==='hi'?'उदाहरण: आज 2 किलो आलू 240 रुपये के बेचे।': 'Try: Aaj 2 kilo aalo beche h 240rs k.'}</p>
+       <div className="saathi-question-grid">{[...copy.qs.slice(0,3),language==='hi'?'आज 2 किलो आलू 240 रुपये के बेचे':'Aaj 2 kilo aalo beche h 240rs k'].map(s=><button type="button" key={s} onClick={()=>void ask(s)} disabled={loading}><span className="material-symbols-outlined">auto_awesome</span>{s}</button>)}</div>
+     </div>}
+     {messages.map(m=><div className={'saathi-message '+(m.role==='user'?'saathi-from-user':'saathi-from-agent')} key={m.id}>
+       {m.role==='assistant'&&<span className="saathi-avatar" aria-hidden="true">सा</span>}
+       <div className="saathi-message-stack"><div className="saathi-bubble">{m.text}</div>
+       {m.role==='assistant'&&<div className="saathi-message-tools">
+         <span className="saathi-source">{m.mode==='live'?t.live:t.guide}</span>
+         <button type="button" aria-label="Read reply aloud" onClick={()=>speak(m.text,voiceLang)}><span className="material-symbols-outlined">volume_up</span></button>
+         {m.route&&m.route!=='none'&&availableRoutes.has(m.route)&&<button type="button" onClick={()=>onNavigate(m.route as NavPath)}><span className="material-symbols-outlined">arrow_forward</span> {routeLabels[m.route as NavPath]||t.header}</button>}
+       </div>}</div></div>)}
+     {loading&&<div className="saathi-message saathi-from-agent"><span className="saathi-avatar">सा</span><div className="saathi-thinking"><span/><span/><span/> {t.working}</div></div>}
+     <div ref={tail}/>
     </div>
-  );
-};
+    {draft&&<section className="saathi-draft" aria-label={t.review}>
+      <div className="saathi-draft-heading"><span className="material-symbols-outlined">{draft.intent==='invoice'?'receipt_long':'edit_note'}</span><div><h3>{draft.intent==='invoice'?t.invoice:t.review}</h3><small>{draft.intent==='expense'?'Expense':draft.intent==='invoice'?'Draft receipt':'Sale'} · {draft.day}</small></div><button type="button" onClick={()=>{setDraft(null);setSavedMessage('')}} aria-label={t.cancel}><span className="material-symbols-outlined">close</span></button></div>
+      <div className="saathi-fields">
+       <label>{t.item}<input value={draft.item} maxLength={70} placeholder={language==='hi'?'जैसे आलू':'e.g. Aloo'} onChange={e=>updateDraft('item',e.target.value)}/></label>
+       <label>{t.quantity}<input type="number" min=".01" max="100000" step=".01" value={draft.quantity??''} placeholder="—" onChange={e=>updateDraft('quantity',e.target.value===''?null:Number(e.target.value))}/></label>
+       <label>{language==='hi'?'इकाई':'Unit'}<select value={draft.unit||'pcs'} onChange={e=>updateDraft('unit',e.target.value as VoiceUnit)}><option value="kg">kg</option><option value="litres">litres</option><option value="pcs">pcs</option><option value="packs">packs</option><option value="boxes">boxes</option></select></label>
+       <label>{t.amount}<input type="number" min=".01" max="10000000" step=".01" value={draft.amount??''} placeholder="₹" onChange={e=>updateDraft('amount',e.target.value===''?null:Number(e.target.value))}/></label>
+       <label>{t.method}<select value={draft.method} onChange={e=>updateDraft('method',e.target.value as ManualMethod)}><option value="Cash">Cash</option><option value="UPI">UPI (manual)</option><option value="Bank">Bank (manual)</option><option value="Other">Other</option></select></label>
+      </div>
+      <p className="saathi-draft-hint">{t.hint} {t.edit} {shop.demo?t.demo:''}</p>
+      {savedMessage&&<p className="saathi-draft-saved" role="status">{savedMessage}</p>}
+      <div className="saathi-draft-actions">
+       <button className="saathi-confirm" type="button" disabled={!canSave||saving||recorded} onClick={()=>void saveDraft()}><span className="material-symbols-outlined">check_circle</span>{saving?'Saving…':recorded?t.saved:t.record}</button>
+       {draft.intent==='invoice'&&<button type="button" className="saathi-print" onClick={()=>window.print()} disabled={!canSave||draft.quantity===null||draft.quantity<=0}><span className="material-symbols-outlined">print</span>{t.print}</button>}
+       <button type="button" className="saathi-discard" onClick={()=>{setDraft(null);setSavedMessage('')}}>{t.cancel}</button>
+      </div>
+    </section>}
+    {warning&&<p className="saathi-notice" role="status"><span className="material-symbols-outlined">info</span>{warning}</p>}
+    {(isBrave()||voiceProblem!=='none'||micResult||voicePhase!=='idle'||localPhase!=='idle')&&<div className="saathi-mic-help" role="region" aria-label="Microphone troubleshooting">
+       {(voicePhase!=='idle'||localPhase!=='idle')?<p><span className="material-symbols-outlined">graphic_eq</span>{voiceStatus}{localProgress?.percent!==undefined?' · '+localProgress.percent+'%':''}</p>:
+         <p><span className="material-symbols-outlined">info</span>{isBrave()?(localMode?(language==='hi'?'Brave के लिए Whisper चुना गया है — ऑडियो इसी ब्राउज़र में पहचाना जाएगा।':language==='bn'?'Brave-এর জন্য Whisper সক্রিয়: অডিও এই ব্রাউজারেই শনাক্ত হবে।':'Brave detected: private on-device Whisper is enabled instead of Brave’s failing speech service.'):(language==='hi'?'Brave की ऑनलाइन स्पीच सेवा काम नहीं कर सकती। ऑफ़लाइन Whisper चालू करें।':'Brave speech recognition may fail; enable local Whisper.')):(voiceProblem==='none'?'Speech recognition support depends on your browser.':'Speech recognition needs attention.')}</p>}
+       {localMode&&<p><span className="material-symbols-outlined">shield</span>{language==='hi'?'Whisper मॉडल पहली बार इंटरनेट से डाउनलोड होगा; उसके बाद आवाज़ आपके ब्राउज़र में पहचानी जाएगी। छोटी रिकॉर्डिंग बोलें, फिर Stop दबाएँ।':language==='bn'?'মডেল প্রথমে ডাউনলোড হবে, তারপর অডিও এই ব্রাউজারেই ট্রান্সক্রাইব হবে।':'First use downloads a multilingual Whisper model; audio stays in your browser. Speak briefly and press Stop to transcribe.'}</p>}
+       {micResult?.ok&&<p className="saathi-mic-success"><span className="material-symbols-outlined">check_circle</span>{language==='hi'?'माइक टेस्ट सफल':'Microphone test passed'} · {micResult.details}</p>}
+       <div className="saathi-mic-help-actions">
+         <button type="button" onClick={()=>void checkMicrophone()} disabled={testingMic||voicePhase!=='idle'||localPhase!=='idle'}><span className="material-symbols-outlined">settings_voice</span>{testingMic?(language==='hi'?'माइक जाँच रहे हैं…':'Checking microphone…'):(language==='hi'?'माइक टेस्ट करें':'Test microphone')}</button>
+         <button type="button" onClick={focusWindowsDictation}><span className="material-symbols-outlined">keyboard_voice</span>{language==='hi'?'Windows Win + H':'Windows dictation (Win + H)'}</button>
+         {isBrave()&&<button type="button" onClick={()=>void copyEdgeLink()}><span className="material-symbols-outlined">open_in_new</span>{language==='hi'?'Edge के लिए लिंक कॉपी':'Copy link for Edge'}</button>}
+       </div>
+     </div>}
+    {voiceReview&&<section className={'saathi-transcript '+(voiceReview.uncertain?'saathi-transcript-uncertain':'')} aria-label="Review voice transcription">
+      <div className="saathi-transcript-title"><span className="material-symbols-outlined">{voiceReview.uncertain?'hearing_disabled':'record_voice_over'}</span>
+        <div><strong>{language==='hi'?'क्या मैंने सही सुना?':language==='bn'?'আমি কি ঠিক শুনেছি?':'Did I hear you correctly?'}</strong>
+        <small>{voiceReview.uncertain?(language==='hi'?'आवाज़ साफ़ नहीं समझी — टेक्स्ट बदलें या फिर बोलें।':'Low-confidence recognition: edit or record again.'):(language==='hi'?'जाँचकर भेजें — अभी कोई जवाब या हिसाब नहीं लिखा गया।':'Review before sending. Nothing has been saved or answered.')}</small></div>
+      </div>
+      <textarea aria-label="Edit recognized words" rows={2} value={voiceReview.text} onChange={e=>setVoiceReview(old=>old?{text:e.target.value,uncertain:false}:null)}/>
+      <div className="saathi-transcript-actions">
+        <button className="saathi-transcript-send" type="button" disabled={!voiceReview.text.trim()||loading||saving} onClick={applyVoiceReview}><span className="material-symbols-outlined">send</span>{language==='hi'?'सही है — भेजें':'Looks right — send'}</button>
+        <button type="button" onClick={()=>{setVoiceReview(null);setQuestion('');void startLocal()}} disabled={localPhase!=='idle'}><span className="material-symbols-outlined">replay</span>{language==='hi'?'फिर से बोलें':'Record again'}</button>
+        <button type="button" onClick={()=>setVoiceReview(null)}><span className="material-symbols-outlined">close</span>{language==='hi'?'हटाएँ':'Discard'}</button>
+      </div>
+     </section>}
+    <div className="saathi-voicebar">
+      <button className={'saathi-mic '+(localPhase==='recording'||voicePhase==='listening'?'listening':'')} type="button" onClick={toggleListen} disabled={loading||saving||testingMic||localPhase==='transcribing'||localPhase==='starting'} aria-pressed={localMode?localPhase==='recording':voicePhase!=='idle'} aria-label={localMode?localPhase==='recording'?'Stop and transcribe':t.voice:voicePhase!=='idle'?t.voiceOff:t.voice}><span className="material-symbols-outlined">{localMode&&localPhase==='recording'||!localMode&&voicePhase!=='idle'?'stop_circle':'mic'}</span>{localMode&&localPhase==='recording'?'Stop & transcribe / लिखें':!localMode&&voicePhase!=='idle'?'Stop / बंद करें':localMode?'Record Hindi / हिंदी बोलें':t.voice}<span className="saathi-voice-bars" aria-hidden="true">▂▅▃</span></button>
+      <label className="saathi-voice-mode"><input type="checkbox" checked={localMode} disabled={localPhase!=='idle'||voicePhase!=='idle'} onChange={e=>{if(!e.target.checked)cancelLocal();setLocalMode(e.target.checked);setWarning('')}}/><span>{language==='hi'?'ब्राउज़र में ऑफ़लाइन Whisper':language==='bn'?'ব্রাউজারে স্থানীয় Whisper':'Private on-device Whisper'}</span></label>
+      <label className="saathi-voice-locale"><span className="sr-only">Voice language</span><select aria-label="Voice language" value={voiceLang} onChange={e=>setVoiceLang(e.target.value as 'hi-IN'|'en-IN'|'bn-IN')}><option value="hi-IN">हिंदी</option><option value="en-IN">English</option><option value="bn-IN">বাংলা</option></select></label>
+      <label className="saathi-read-check"><input type="checkbox" checked={readReplies} onChange={e=>{setReadReplies(e.target.checked);if(!e.target.checked)stopSpeech()}}/><span className="material-symbols-outlined">volume_up</span><span>{t.read}</span></label>
+    </div>
+    <form className="saathi-composer" onSubmit={e=>{e.preventDefault();void ask(question)}}>
+      <label className="sr-only" htmlFor="saathi-question">{t.ask}</label>
+      <textarea ref={questionInput} id="saathi-question" rows={2} maxLength={1000} value={question} onChange={e=>setQuestion(e.target.value)}
+       onKeyDown={e=>{if(e.key==='Enter'&&!e.shiftKey&&!e.nativeEvent.isComposing){e.preventDefault();void ask(question)}}} placeholder={t.ask} disabled={loading||saving}/>
+      <button type="submit" className="saathi-send" disabled={loading||saving||!question.trim()} aria-label={t.send}><span className="material-symbols-outlined">arrow_upward</span></button>
+    </form>
+    <p className="saathi-disclaimer">{t.tip} {localMode?(language==='hi'?'Whisper मॉडल इंटरनेट से डाउनलोड होता है; आपके रिकॉर्ड किए हुए ऑडियो इसी ब्राउज़र में रहते हैं।':'Whisper model files download from Hugging Face; recorded audio stays in this browser.'):t.voiceData}</p>
+   </div>
+   <aside className="saathi-side" aria-label="Assistant options">
+     <div className="saathi-side-section"><div className="saathi-side-heading"><span className="material-symbols-outlined">lightbulb</span><h3>{t.quick}</h3></div>
+       {[...copy.qs,'invoice banado','kitna kharch hua'].map(q=><button type="button" disabled={loading} className="saathi-quick" key={q} onClick={()=>void ask(q)}>{q}<span className="material-symbols-outlined">north_east</span></button>)}
+     </div>
+     <div className="saathi-side-section saathi-privacy">
+       <div className="saathi-side-heading"><span className="material-symbols-outlined">shield</span><h3>{language==='hi'?'मेरे डेटा की सुरक्षा':language==='bn'?'আমার তথ্যের সুরক্ষা':'Your data, your choice'}</h3></div>
+       <label className="saathi-switch-row"><input type="checkbox" checked={personal} disabled={shop.demo} onChange={e=>setPersonal(e.target.checked)}/><span>{t.personal}</span></label><p>{t.priv}</p>
+     </div>
+     <button type="button" className="saathi-clear" onClick={clear} disabled={loading||saving||messages.length===0}><span className="material-symbols-outlined">delete_sweep</span>{t.clear}</button>
+     <button type="button" className="saathi-back" onClick={()=>onNavigate('overview')}><span className="material-symbols-outlined">arrow_back</span>{language==='hi'?'मेरी दुकान':language==='bn'?'আমার দোকান':'My Dukaan'}</button>
+   </aside>
+  </div>
+  {draft?.intent==='invoice'&&<article id="saathi-print-receipt" aria-label="Receipt draft">
+    <h2>{merchant?.storeName||'My Dukaan'}</h2><p>DRAFT SALE RECEIPT · NOT A GST TAX INVOICE</p><hr/><p>Date: {draft.day}</p><p>Item: {draft.item||'—'}</p><p>Quantity: {draft.quantity||'—'} {draft.unit||'pcs'}</p><p>Payment: {draft.method} (self-reported)</p><h3>Total: {formatRupees(Number(draft.amount||0))}</h3><hr/><small>{recorded?'Entered in shop Hisaab':'Not yet entered in Hisaab'} · Draft record for customer reference only</small>
+  </article>}
+ </section>;
+}

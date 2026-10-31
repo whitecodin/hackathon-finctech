@@ -4,6 +4,8 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import dotenv from 'dotenv';
 import jwt from 'jsonwebtoken';
+import { sql } from 'drizzle-orm';
+import { db } from './src/db/index.ts';
 import { GoogleGenAI } from '@google/genai';
 import { WebSocketServer } from 'ws';
 import { adminAuth } from './src/lib/firebase-admin.ts';
@@ -50,46 +52,15 @@ app.get('/api/health', (req: Request, res: Response) => {
   res.json({
     status: 'online',
     platform: 'VyaparTrust Sovereign Core',
-    database: 'Cloud SQL PostgreSQL Active',
+    database: 'not_checked',
     aiEnabled: !!geminiApiKey,
     timestamp: new Date().toISOString(),
   });
 });
 
-// 2. Auth: Email / Mobile / PIN login (Generates JWT)
-app.post('/api/auth/login', async (req: Request, res: Response) => {
-  try {
-    const { identifier, pin } = req.body;
-    // Default demo credentials: ramesh.store@vyapartrust.in or any identifier
-    const email = identifier && identifier.includes('@') ? identifier : 'ramesh.store@vyapartrust.in';
-    const uid = `merchant-${email.replace(/[^a-zA-Z0-9]/g, '_')}`;
-    const displayName = 'Ramesh Kumar';
-
-    const dbUser = await getOrCreateUser(uid, email, displayName);
-    const merchant = await getMerchantDetails(uid);
-
-    // Issue JWT
-    const token = jwt.sign(
-      { uid: dbUser.uid, email: dbUser.email, displayName: dbUser.displayName },
-      JWT_SECRET,
-      { expiresIn: '7d' }
-    );
-
-    res.json({
-      success: true,
-      token,
-      user: {
-        id: dbUser.id,
-        uid: dbUser.uid,
-        email: dbUser.email,
-        displayName: dbUser.displayName,
-      },
-      merchant,
-    });
-  } catch (error: any) {
-    console.error('Login error:', error);
-    res.status(500).json({ error: error.message || 'Authentication failed' });
-  }
+// Legacy PIN login was unauthenticated. Reject until a verified PIN identity provider exists.
+app.post('/api/auth/login', (_req: Request, res: Response) => {
+  res.status(410).json({ error: 'PIN login is disabled. Sign in using Firebase.' });
 });
 
 // 3. Auth: Firebase Token Verification & Sync
@@ -111,7 +82,7 @@ app.post('/api/auth/firebase-verify', async (req: Request, res: Response) => {
     // Sign session JWT
     const token = jwt.sign(
       { uid: dbUser.uid, email: dbUser.email, displayName: dbUser.displayName },
-      JWT_SECRET,
+      JWT_SECRET as string,
       { expiresIn: '7d' }
     );
 
@@ -132,10 +103,82 @@ app.post('/api/auth/firebase-verify', async (req: Request, res: Response) => {
   }
 });
 
-// 4. Merchant Profile & Underwriting Snapshot
-app.get('/api/merchant/profile', async (req: Request, res: Response) => {
+
+// Merchant League — opted-in, category-matched merchant competition.
+app.get('/api/league', requireAuth, async (req: Request, res: Response) => {
   try {
-    const uid = (req.query.uid as string) || 'demo-ramesh-user-uid';
+    const merchant = await getMerchantDetails((req as AuthRequest).user!.uid);
+    if (!merchant) return res.status(404).json({ error: 'Merchant not found' });
+    const scope = req.query.scope === 'city' ? 'city' : 'local';
+    const preference = await db.execute(sql`SELECT opted_in FROM merchant_league_preferences WHERE merchant_id = ${merchant.id}`);
+    if (preference.rows[0]?.opted_in !== true) {
+      return res.json({ optedIn: false, scope, rows: [], minGroup: 5 });
+    }
+    // Normalize city by using the second-to-last comma-delimited location component.
+    const cityParts = merchant.location.split(',').map((x: string) => x.trim().toLowerCase());
+    const city = cityParts.length > 1 ? cityParts[cityParts.length - 2] : cityParts[0];
+    const records = await db.execute(sql`
+      SELECT m.id, p.display_alias AS alias,
+        COALESCE(SUM(CASE WHEN t.type = 'inflow'
+          AND t.created_at >= NOW() - INTERVAL '30 days'
+          THEN t.amount ELSE 0 END), 0)::numeric AS gross
+      FROM merchants m
+      JOIN merchant_league_preferences p
+        ON p.merchant_id = m.id AND p.opted_in = TRUE
+      LEFT JOIN transactions t ON t.merchant_id = m.id
+      WHERE LOWER(m.category) = LOWER(${merchant.category})
+        AND LOWER(TRIM((regexp_match(m.location, '([^,]+),[^,]+$'))[1])) = ${city}
+        AND (${scope} = 'city' OR m.pin_code = ${merchant.pinCode})
+      GROUP BY m.id, p.display_alias
+      ORDER BY gross DESC, m.id ASC
+    `);
+    // City values are parsed from text; replace with canonical city IDs before wide rollout.
+    if (records.rows.length < 5) {
+      return res.json({ optedIn: true, scope, rows: [], minGroup: 5, awaitingPeers: true });
+    }
+    const rows = records.rows.map((entry: any, index: number) => ({
+      rank: index + 1,
+      alias: entry.alias,
+      self: Number(entry.id) === merchant.id,
+      averageDailyGross: Math.round(Number(entry.gross) / 30),
+      tier: index < 3 ? 'Gold' : index < 10 ? 'Silver' : 'Bronze'
+    }));
+    return res.json({ optedIn: true, scope, rows, minGroup: 5,
+      population: rows.length, currency: 'INR',
+      basis: 'Recorded inflow over 30 days divided by 30; not verified sales or profit' });
+  } catch (error) {
+    console.error('Merchant League query failed:', error);
+    return res.status(503).json({ error: 'Merchant League unavailable. Verify migration and database.' });
+  }
+});
+
+app.post('/api/league/preferences', requireAuth, async (req: Request, res: Response) => {
+  try {
+    const merchant = await getMerchantDetails((req as AuthRequest).user!.uid);
+    if (!merchant) return res.status(404).json({ error: 'Merchant not found' });
+    const { optedIn, alias } = req.body || {};
+    if (typeof optedIn !== 'boolean' || typeof alias !== 'string' ||
+        !/^[a-zA-Z0-9 ._-]{3,40}$/.test(alias.trim())) {
+      return res.status(400).json({ error: 'Provide valid participation and a 3–40 character alias' });
+    }
+    await db.execute(sql`
+      INSERT INTO merchant_league_preferences (merchant_id, opted_in, display_alias, updated_at)
+      VALUES (${merchant.id}, ${optedIn}, ${alias.trim()}, NOW())
+      ON CONFLICT (merchant_id)
+      DO UPDATE SET opted_in = EXCLUDED.opted_in,
+        display_alias = EXCLUDED.display_alias, updated_at = NOW()
+    `);
+    return res.json({ success: true, optedIn });
+  } catch (error) {
+    console.error('Merchant League preferences failed:', error);
+    return res.status(503).json({ error: 'Merchant League preferences unavailable' });
+  }
+});
+
+// Merchant Profile & Underwriting Snapshot
+app.get('/api/merchant/profile', requireAuth, async (req: Request, res: Response) => {
+  try {
+    const uid = (req as AuthRequest).user!.uid;
     const merchant = await getMerchantDetails(uid);
     if (!merchant) {
       return res.status(404).json({ error: 'Merchant profile not found' });
@@ -162,9 +205,9 @@ app.get('/api/merchant/profile', async (req: Request, res: Response) => {
 });
 
 // 4b. SQL Overview Metrics Endpoint
-app.get('/api/overview/metrics', async (req: Request, res: Response) => {
+app.get('/api/overview/metrics', requireAuth, async (req: Request, res: Response) => {
   try {
-    const uid = (req.query.uid as string) || 'demo-ramesh-user-uid';
+    const uid = (req as AuthRequest).user!.uid;
     const merchant = await getMerchantDetails(uid);
     if (!merchant) {
       return res.status(404).json({ error: 'Merchant not found' });
@@ -175,7 +218,7 @@ app.get('/api/overview/metrics', async (req: Request, res: Response) => {
 
     res.json({
       success: true,
-      database: 'Cloud SQL PostgreSQL Active',
+      database: 'query_succeeded',
       region: 'asia-southeast1',
       merchant,
       metrics: {
@@ -195,9 +238,9 @@ app.get('/api/overview/metrics', async (req: Request, res: Response) => {
 });
 
 // 5. Transactions List
-app.get('/api/transactions', async (req: Request, res: Response) => {
+app.get('/api/transactions', requireAuth, async (req: Request, res: Response) => {
   try {
-    const uid = (req.query.uid as string) || 'demo-ramesh-user-uid';
+    const uid = (req as AuthRequest).user!.uid;
     const merchant = await getMerchantDetails(uid);
     if (!merchant) {
       return res.status(404).json({ error: 'Merchant not found' });
@@ -217,12 +260,16 @@ app.get('/api/transactions', async (req: Request, res: Response) => {
 });
 
 // 6. Resolve Transaction Anomaly / Update Note
-app.post('/api/transactions/:id/resolve', async (req: Request, res: Response) => {
+app.post('/api/transactions/:id/resolve', requireAuth, async (req: Request, res: Response) => {
   try {
     const txnId = parseInt(req.params.id, 10);
     const { status, note } = req.body; // 'verified_by_merchant' | 'reported_bank'
 
-    const updated = await updateTransactionStatus(txnId, status, note);
+    if (!Number.isSafeInteger(txnId) || !['verified_by_merchant','reported_bank'].includes(status)) return res.status(400).json({error:'Invalid transaction or status'});
+    const merchant = await getMerchantDetails((req as AuthRequest).user!.uid);
+    if (!merchant) return res.status(404).json({error:'Merchant not found'});
+    const updated = await updateTransactionStatus(txnId, status, merchant.id, note);
+    if (!updated) return res.status(404).json({error:'Transaction not found'});
     res.json({
       success: true,
       transaction: updated,
@@ -237,15 +284,16 @@ app.post('/api/transactions/:id/resolve', async (req: Request, res: Response) =>
 });
 
 // 7. ML Underwriting Predictor Endpoint (Scikit-learn model simulation)
-app.post('/api/ml/predict-score', (req: Request, res: Response) => {
+app.post('/api/ml/predict-score', requireAuth, (req: Request, res: Response) => {
   try {
     const { monthlyInflow, dailyUpiVolume, liquidReserveDays, unresolvedFlagsCount } = req.body;
+    if (![monthlyInflow,dailyUpiVolume,liquidReserveDays,unresolvedFlagsCount].every(v => typeof v === 'number' && Number.isFinite(v) && v >= 0)) return res.status(400).json({error:'Invalid score inputs'});
     const result = computeUnderwritingScore({
-      monthlyInflow: Number(monthlyInflow) || 160000,
-      dailyUpiVolume: Number(dailyUpiVolume) || 14820,
+      monthlyInflow: Number(monthlyInflow),
+      dailyUpiVolume: Number(dailyUpiVolume),
       daysActiveSync: 90,
-      unresolvedFlagsCount: unresolvedFlagsCount !== undefined ? Number(unresolvedFlagsCount) : 2,
-      liquidReserveDays: Number(liquidReserveDays) || 18,
+      unresolvedFlagsCount: Number(unresolvedFlagsCount),
+      liquidReserveDays: Number(liquidReserveDays),
       bouncedMandates: 0,
     });
     res.json(result);
@@ -255,38 +303,20 @@ app.post('/api/ml/predict-score', (req: Request, res: Response) => {
 });
 
 // 8. AI Financial Coach (LLM API Powered by Gemini gemini-3.8-flash)
-app.post('/api/coach/chat', async (req: Request, res: Response) => {
+app.post('/api/coach/chat', requireAuth, async (req: Request, res: Response) => {
   try {
     const { message, language = 'en' } = req.body;
-    if (!message) {
+    if (typeof message !== 'string' || message.length > 4000 || !message.trim()) {
       return res.status(400).json({ error: 'Message is required' });
     }
 
-    const merchant = await getMerchantDetails('demo-ramesh-user-uid');
-    const merchantContext = `
-Merchant Name: Ramesh Kumar
-Store Name: Ramesh General Store
-Category: Retail Grocery & Daily Essentials (Kirana), Jaipur, Rajasthan
-Current Sovereign VyaparTrust Score: 78 / 100 (Grade A-)
-Average Monthly Inflow: ₹1,60,000 (Consistent across 90 days)
-Daily UPI Velocity: ₹14,820/day
-Bounced / Mandate Fails: Zero (0)
-Operating Burn Rate: ₹4,800/day
-Liquid Cash Buffer: 18 Days (Safe target: 30 days)
-Flagged Transactions:
- 1. TXN# 9081248: Radhe Shyam Wholesale Traders, -₹48,900 (NEFT on Sunday 11:42 PM, 340% higher than usual supplier batch)
- 2. TXN# 8840121: PayTM QR Aggregator Settlement, +₹18,400 (QR batch split deviation)
-Credit Readiness Band: ₹50,000 – ₹1,00,000
-Safe Monthly EMI Capacity: ₹6,500 – ₹8,200/month
-Key Advice Goals:
- 1. Explain score with radical explainability (+45 UPI velocity, +22 supplier discipline, -8 cash reserve, -6 unverified high value).
- 2. How to reach 85+ score (Tier-1 MSME): Maintain ₹25,000 min balance for 45 days, resolve 2 flags, distribute wholesaler payments.
- 3. Assist in English, Hindi (नमस्ते रमेश जी), or Hinglish respectfully with Indian kirana store realities.
-`;
+    const merchant = await getMerchantDetails((req as AuthRequest).user!.uid);
+    if (!merchant) return res.status(404).json({ error: 'Merchant not found' });
+    const merchantContext = `Merchant: ${merchant.ownerName}; Store: ${merchant.storeName}; Monthly inflow: INR ${merchant.monthlyInflow}; Reserve days: ${merchant.resilienceDays}. Scores are illustrative, not lender-verified. Never guarantee loans.`;
 
     if (aiClient) {
       const systemInstruction = `You are VyaparTrust's Sovereign AI Financial Coach for Indian Kirana & MSME shopkeepers.
-You provide clear, friendly, and explainable underwriting advice rooted in consented Account Aggregator and UPI data.
+You provide educational guidance using the provided illustrative financial profile only; do not claim verified bank or Account Aggregator data.
 Maintain a respectful, empowering tone (e.g., "Namaste Ramesh ji!").
 If the user asks in Hindi or requests Hindi, provide the response in clear, conversational Hindi or Hinglish.
 Give specific numbers, math attribution, and actionable steps.
@@ -309,10 +339,7 @@ Merchant Financial Profile Context:\n${merchantContext}`;
       });
     } else {
       // Fallback response with grounded business logic if API key is not present
-      let fallbackReply = `Namaste Ramesh ji! Your current score is 78/100 (Grade A-). Your daily UPI collections of ₹14,820 demonstrate strong neighborhood footfall. To reach 85+ and unlock ₹1.5L credit lines, resolve the flagged ₹48,900 transfer and maintain a ₹35,000 minimum daily buffer.`;
-      if (message.toLowerCase().includes('hindi') || language === 'hi') {
-        fallbackReply = `नमस्ते रमेश जी! आपका वित्तीय स्वास्थ्य स्कोर 78/100 है। आपका दैनिक नकद प्रवाह बहुत मजबूत है। यदि आप अपनी 2 फ्लैग्ड लेनदेनों को सत्यापित कर लें और 30 दिनों का नकद बैकअप बना लें, तो आपका स्कोर 85+ हो जाएगा और आपको ₹1.5 लाख तक की क्रेडिट सीमा मिल सकती है।`;
-      }
+      const fallbackReply = language === 'hi' ? 'वित्तीय मार्गदर्शन के लिए AI सेवा अभी उपलब्ध नहीं है। अपने व्यापार के वास्तविक रिकॉर्ड जांचें।' : 'The AI coach is currently unavailable. Financial scores in this prototype are illustrative, not lending decisions.';
       res.json({
         reply: fallbackReply,
         source: 'rule-engine-fallback',
@@ -325,92 +352,19 @@ Merchant Financial Profile Context:\n${merchantContext}`;
   }
 });
 
-// 9. Cryptographic Financial Passport Generation
-app.post('/api/passport/generate', async (req: Request, res: Response) => {
-  try {
-    const merchant = await getMerchantDetails('demo-ramesh-user-uid');
-    const hash = 'SHA256:' + Buffer.from(`${merchant?.passportUid}-${Date.now()}`).toString('hex').slice(0, 32);
-
-    res.json({
-      success: true,
-      passportUid: merchant?.passportUid || 'VY-IND-2026-004821',
-      score: 78,
-      grade: 'Grade A-',
-      hash,
-      issuedAt: new Date().toISOString(),
-      rbiAaProtocolVerified: true,
-      shareableUrl: `/passport/verify/${merchant?.passportUid || 'VY-IND-2026-004821'}`,
-    });
-  } catch (error: any) {
-    res.status(500).json({ error: 'Failed to generate passport' });
-  }
+// Financial credentials cannot be issued until server-side signing and verification exist.
+app.post('/api/passport/generate', requireAuth, (_req: Request, res: Response) => {
+  res.status(501).json({ success: false, error: 'Signed passport issuance not implemented' });
 });
-
-// 10. Instant Underwriter Verification API
-app.get('/api/passport/verify/:uid', async (req: Request, res: Response) => {
-  try {
-    const { uid } = req.params;
-    const merchant = await getMerchantDetails('demo-ramesh-user-uid');
-
-    const verificationPayload = {
-      verified: true,
-      verificationTimestamp: new Date().toISOString(),
-      credentialStatus: 'ACTIVE_VALIDATED',
-      passportUid: uid || merchant?.passportUid || 'VY-IND-2026-004821',
-      issuer: 'VyaparTrust Sovereign Underwriting Protocol (RBI AA Ecosystem)',
-      cryptographicSeal: 'SHA256:7f8c92a104b2c89d51e709a3c4819df5',
-      consentArtifactId: 'AA-SBI-VT-8819283-ENC',
-      validityWindow: {
-        issuedDate: '14 Jan 2026',
-        expirationDate: '14 Jul 2026',
-      },
-      merchant: {
-        storeName: merchant?.storeName || 'Ramesh General Store',
-        ownerName: merchant?.ownerName || 'Ramesh Kumar',
-        category: merchant?.category || 'Retail Kirana & Daily Essentials',
-        location: merchant?.location || 'Jaipur, Rajasthan',
-        pinCode: merchant?.pinCode || '302001',
-        gstin: merchant?.gstin || '08AAACR4092K1Z9',
-        udyamId: merchant?.udyamId || 'UDYAM-RJ-14-002819',
-        bankAccountVerified: 'SBI ••4891 (Active AA Mandate)',
-      },
-      underwritingMetrics: {
-        vyaparScore: merchant?.healthScore || 78,
-        riskGrade: merchant?.riskGrade || 'Grade A-',
-        riskTier: 'Tier-1 Micro Merchant',
-        recommendedCreditBand: {
-          min: merchant?.creditBandMin || 50000,
-          max: merchant?.creditBandMax || 100000,
-          currency: 'INR',
-        },
-        safeMonthlyEmi: {
-          min: merchant?.safeEmiMin || 6500,
-          max: merchant?.safeEmiMax || 8200,
-          currency: 'INR',
-        },
-        cashflowRegularity: '94.2% daily active settlement',
-        mandateBounces: 0,
-        averageMonthlyInflow: 160000,
-        liquidReserveRunwayDays: merchant?.resilienceDays || 18,
-      },
-      compliance: {
-        dpdpAct2023Compliant: true,
-        zeroKnowledgeProofVerified: true,
-        hardBureauInquiryCount: 0,
-      },
-    };
-
-    res.json(verificationPayload);
-  } catch (error: any) {
-    res.status(500).json({ error: 'Underwriter verification retrieval failed' });
-  }
+app.get('/api/passport/verify/:uid', (_req: Request, res: Response) => {
+  res.status(501).json({ verified: false, error: 'Cryptographic verification not implemented' });
 });
 
 // 11. Update Merchant Location
-app.post('/api/merchant/update-location', async (req: Request, res: Response) => {
+app.post('/api/merchant/update-location', requireAuth, async (req: Request, res: Response) => {
   try {
     const { location, pinCode } = req.body;
-    const merchant = await getMerchantDetails('demo-ramesh-user-uid');
+    const merchant = await getMerchantDetails((req as AuthRequest).user!.uid);
     if (!merchant) {
       return res.status(404).json({ error: 'Merchant not found' });
     }
@@ -428,10 +382,10 @@ app.post('/api/merchant/update-location', async (req: Request, res: Response) =>
 });
 
 // 12. Update Merchant Profile (storeName, ownerName, category, location, pinCode)
-app.post('/api/merchant/update-profile', async (req: Request, res: Response) => {
+app.post('/api/merchant/update-profile', requireAuth, async (req: Request, res: Response) => {
   try {
     const { storeName, ownerName, category, location, pinCode } = req.body;
-    const merchant = await getMerchantDetails('demo-ramesh-user-uid');
+    const merchant = await getMerchantDetails((req as AuthRequest).user!.uid);
     if (!merchant) {
       return res.status(404).json({ error: 'Merchant not found' });
     }
@@ -452,14 +406,15 @@ app.post('/api/merchant/update-profile', async (req: Request, res: Response) => 
 });
 
 // 13. Gemini Live Conversational Voice Experience (HTTP endpoint)
-app.post('/api/coach/live-talk', async (req: Request, res: Response) => {
+app.post('/api/coach/live-talk', requireAuth, async (req: Request, res: Response) => {
   try {
     const { message, language = 'en', voiceName = 'Zephyr' } = req.body;
-    if (!message) {
+    if (typeof message !== 'string' || message.length > 4000 || !message.trim()) {
       return res.status(400).json({ error: 'Message is required' });
     }
 
-    const merchant = await getMerchantDetails('demo-ramesh-user-uid');
+    const merchant = await getMerchantDetails((req as AuthRequest).user!.uid);
+    if (!merchant) return res.status(404).json({ error: 'Merchant not found' });
     let replyText = '';
     let audioBase64: string | null = null;
 
@@ -555,57 +510,10 @@ async function startServer() {
   // Gemini Live API WebSocket Bridge
   const wss = new WebSocketServer({ server: httpServer, path: '/api/live' });
 
-  wss.on('connection', async (clientWs) => {
-    console.log('Client connected to Gemini Live voice channel');
-    let session: any = null;
-
-    try {
-      if (aiClient && (aiClient as any).live) {
-        session = await (aiClient as any).live.connect({
-          model: 'gemini-3.8-live',
-          config: {
-            responseModalities: ['AUDIO'],
-            speechConfig: {
-              voiceConfig: { prebuiltVoiceConfig: { voiceName: 'Zephyr' } },
-            },
-            systemInstruction: `You are VyaparTrust's conversational AI Voice Coach for Indian retail kirana merchants. Speak warmly, respectfully, and concisely. Assist Ramesh General Store with debt repayment, credit line utilization, and liquidity runway.`,
-          },
-          callbacks: {
-            onmessage: (msg: any) => {
-              const audio = msg.serverContent?.modelTurn?.parts?.[0]?.inlineData?.data;
-              if (audio) {
-                clientWs.send(JSON.stringify({ audio }));
-              }
-              if (msg.serverContent?.interrupted) {
-                clientWs.send(JSON.stringify({ interrupted: true }));
-              }
-            },
-          },
-        });
-
-        clientWs.on('message', (rawData) => {
-          try {
-            const data = JSON.parse(rawData.toString());
-            if (data.audio && session) {
-              session.sendRealtimeInput({
-                audio: { data: data.audio, mimeType: 'audio/pcm;rate=16000' },
-              });
-            }
-          } catch (err) {
-            console.error('Error forwarding live audio chunk:', err);
-          }
-        });
-      } else {
-        clientWs.send(JSON.stringify({ status: 'live_ready', simulated: true }));
-      }
-    } catch (liveErr) {
-      console.warn('Gemini live session initialization fallback:', liveErr);
-      clientWs.send(JSON.stringify({ status: 'live_fallback', simulated: true }));
-    }
-
-    clientWs.on('close', () => {
-      console.log('Gemini Live voice channel closed');
-    });
+  wss.on('connection', (clientWs) => {
+    // Until an authenticated handshake and session quotas are implemented,
+    // do not accept live audio streams from unauthenticated clients.
+    clientWs.close(1008, 'Authenticated live voice not available');
   });
 
   if (process.env.NODE_ENV !== 'production') {

@@ -1,0 +1,279 @@
+/* VYAPARTRUST — BAZAAR / BAHI-KHATA DESIGN SYSTEM
+   A warm, readable, distinctive, mobile-first retail interface. */
+:root {
+ --ui-bg:#f8f2e6; --ui-panel:#fffcf5; --ui-text:#25352f; --ui-sub:#68716a;
+ --ui-border:#e3d9c8; --ui-action:#215846; --ui-action-text:#fffdf5;
+ --desi-saffron:#e9ad49; --desi-clay:#b85436; --desi-gold-light:#fff0d1;
+ --desi-olive:#627650; --desi-raised:#fffaf0; --desi-shadow:0 12px 34px rgba(61,51,27,.06);
+}
+:root[data-theme="dark"] {
+ --ui-bg:#151e1c; --ui-panel:#23302b; --ui-text:#fff5df; --ui-sub:#c5cbbf;
+ --ui-border:#435047; --ui-action:#efd2a0; --ui-action-text:#1d2d25;
+ --desi-saffron:#e7ae57; --desi-clay:#ed9975; --desi-gold-light:#3b362a;
+ --desi-olive:#b6c9a4; --desi-raised:#293a31; --desi-shadow:0 12px 34px rgba(0,0,0,.16);
+}
+body,.app-shell,.simple-landing,.desi-landing {background:var(--ui-bg)!important;color:var(--ui-text)!important;font-family:system-ui,'Noto Sans Devanagari','Nirmala UI',sans-serif!important}
+.app-shell {background-image:radial-gradient(circle at 95% 4%,rgba(233,173,73,.11),transparent 38%);min-height:100vh}
+button,select,input,textarea {font-family:inherit}
+button:not(:disabled),summary { -webkit-tap-highlight-color:transparent }
+button:focus-visible,a:focus-visible,summary:focus-visible,input:focus-visible,select:focus-visible {outline:3px solid var(--desi-clay)!important;outline-offset:3px!important}
+.desi-eyebrow,.desi-nav-caption,.desi-kicker {letter-spacing:.08em;font-size:12px;font-weight:850}
+.desi-brand{display:flex;align-items:center;gap:11px;text-decoration:none;color:var(--ui-text)}
+.desi-brand-mark{width:42px;height:42px;display:grid;place-items:center;background:var(--ui-action);color:var(--ui-action-text);border-radius:14px 14px 5px 14px;font-size:27px;font-weight:900;box-shadow:inset 0 -4px 0 rgba(0,0,0,.12)}
+.desi-brand-words{display:flex;flex-direction:column;line-height:1.15;min-width:0}
+.desi-brand-words strong{font-size:21px;letter-spacing:-.06em;color:var(--ui-text);font-weight:900}
+.desi-brand-words small{font-size:11px;margin-top:5px;color:var(--desi-clay);font-weight:800;letter-spacing:.015em}
+.desi-sidebar.simple-sidebar{width:266px;background:var(--ui-panel);border-right:1px solid var(--ui-border);box-shadow:3px 0 22px rgba(34,30,19,.025)}
+.desi-sidebar .sidebar-brand{padding:23px 20px 22px;border-bottom:0;background:transparent;gap:10px}
+.desi-sidebar .sidebar-close {color:var(--ui-text)}
+.desi-shop-card{display:flex;align-items:center;gap:12px;margin:2px 15px 26px;padding:15px 13px;background:var(--desi-raised);border:1px solid var(--ui-border);border-radius:17px;position:relative;overflow:hidden}
+.desi-shop-card:before{content:"";height:4px;position:absolute;left:0;right:0;top:0;background:linear-gradient(90deg,var(--desi-saffron) 0 55%,var(--desi-clay) 55% 75%,var(--ui-action) 75%)}
+.desi-shop-avatar{flex-shrink:0;width:43px;height:43px;display:grid;place-items:center;background:var(--desi-gold-light);border:1px solid var(--ui-border);border-radius:14px;color:var(--desi-clay)}
+.desi-shop-avatar .material-symbols-outlined{font-size:25px}
+.desi-shop-meta{min-width:0;display:flex;flex-direction:column;gap:4px}
+.desi-shop-meta strong{font-size:15px;font-weight:900;max-width:150px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.desi-shop-meta small{font-size:11px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:var(--ui-sub);max-width:158px}
+.desi-shop-meta .desi-eyebrow{font-size:10px;color:var(--desi-clay)}
+.desi-side-nav.simple-nav{padding:0 15px 15px;display:flex;flex-direction:column;gap:6px;overflow-y:auto}
+.desi-nav-caption{display:block;color:var(--ui-sub);padding:2px 15px 9px;font-size:10px}
+.desi-side-nav.simple-nav button{min-height:53px;border:0;display:flex;align-items:center;gap:14px;padding:12px 14px;border-radius:12px;color:var(--ui-text);font-size:15px;font-weight:750;letter-spacing:-.01em;transition:background .15s,transform .15s}
+.desi-side-nav.simple-nav button>.material-symbols-outlined{font-size:23px}
+.desi-side-nav.simple-nav button:hover:not(.active){background:var(--desi-gold-light);transform:translateX(2px)}
+.desi-side-nav.simple-nav button.active{background:var(--ui-action);color:var(--ui-action-text);box-shadow:0 5px 12px rgba(27,70,52,.1)}
+.desi-active-dot{width:6px;height:6px;margin-left:auto;border-radius:50%;background:var(--desi-saffron)}
+.desi-side-nav .desi-more-nav .desi-expand{margin-left:auto;font-size:20px!important}
+.desi-nav-divider{height:1px;background:var(--ui-border);margin:8px 12px}
+.desi-side-footer{margin-top:auto;padding:19px 18px 24px;color:var(--ui-sub);font-size:12px;border-top:1px solid var(--ui-border);font-weight:700;display:flex;align-items:center;gap:9px}
+.desi-footer-motif{font-size:24px;color:var(--desi-clay)}
+.dashboard-content{margin-left:266px;background:transparent}
+.desi-header.simple-header{left:266px;min-height:76px;background:var(--ui-panel);border-bottom:1px solid var(--ui-border);padding:13px clamp(18px,3vw,38px);box-shadow:none}
+.desi-header .header-heading{gap:11px}
+.desi-header .header-heading h1{font-size:23px;font-weight:900;letter-spacing:-.04em;color:var(--ui-text)}
+.desi-header-mark{font-size:24px;color:var(--desi-clay)}
+.desi-header .header-actions{gap:10px}
+.desi-lang-wrap{display:flex;align-items:center;gap:2px;border:1px solid var(--ui-border);border-radius:12px;background:var(--desi-raised);color:var(--ui-text);padding-left:11px;min-height:44px}
+.desi-lang-wrap>.material-symbols-outlined{font-size:19px;color:var(--ui-sub)}
+.desi-lang-wrap .simple-language{min-height:40px;border:0;padding:6px 10px 6px 5px;background:transparent;color:var(--ui-text);font-size:14px;max-width:104px}
+.desi-lang-wrap select option{background:var(--ui-panel);color:var(--ui-text)}
+.desi-theme-toggle{min-height:44px;display:inline-flex;align-items:center;justify-content:center;gap:6px;background:var(--desi-raised);border:1px solid var(--ui-border);border-radius:12px;padding:0 14px;font-size:13px;font-weight:800;color:var(--ui-text);white-space:nowrap}
+.desi-theme-toggle .material-symbols-outlined{font-size:19px;color:var(--desi-clay)}
+.desi-header .signout-button{min-height:44px;border-radius:12px;border:1px solid var(--ui-border);background:var(--desi-raised);display:flex;align-items:center;gap:7px;padding:0 13px;font-size:13px;color:var(--ui-text)}
+.desi-header .signout-button .material-symbols-outlined{font-size:19px}
+.dashboard-main{padding:110px clamp(18px,3vw,40px) 65px;max-width:1230px}
+.desi-home{max-width:990px;margin:0 auto;padding-bottom:24px}
+.desi-welcome{position:relative;min-height:248px;border-radius:25px;background:linear-gradient(115deg,#205641,#347050);padding:37px 43px;overflow:hidden;color:#fff9e8;display:flex;align-items:center;justify-content:space-between;gap:15px;box-shadow:0 13px 28px rgba(28,75,51,.1)}
+:root[data-theme="dark"] .desi-welcome{background:linear-gradient(125deg,#315444,#21382e)}
+.desi-welcome:before{content:"";position:absolute;inset:0;opacity:.12;background-image:radial-gradient(circle,#eac17b 1.2px,transparent 1.6px);background-size:20px 20px;mask-image:linear-gradient(90deg,transparent 35%,black 100%)}
+.desi-welcome-copy{position:relative;z-index:2;max-width:580px;align-self:center}
+.desi-kicker{display:inline-flex;align-items:center;gap:7px;color:#ffe1a2;font-weight:800;letter-spacing:.01em;font-size:15px}
+.desi-kicker-star{font-size:18px}
+.desi-welcome h2{font-size:clamp(30px,3.4vw,47px);font-weight:900;letter-spacing:-.045em;line-height:1.24;margin:12px 0 8px;color:#fff9e8}
+.desi-welcome p{color:#e3f0de;font-size:16px;line-height:1.6;margin:0}
+.desi-welcome-shop{margin-top:24px;display:inline-flex;align-items:center;gap:7px;padding:10px 14px;border:1px solid rgba(255,255,255,.25);border-radius:100px;background:rgba(255,255,255,.1);font-size:13px;font-weight:800;max-width:100%;overflow-wrap:anywhere}
+.desi-welcome-shop .material-symbols-outlined{font-size:19px;color:#f2bf67}
+.desi-welcome-art{position:relative;flex-shrink:0;width:224px;height:200px;margin-right:12px;align-self:end;filter:drop-shadow(0 12px 8px rgba(0,0,0,.12))}
+.desi-art-sun{position:absolute;width:135px;height:135px;border:2px dashed #f2c773;border-radius:50%;top:-5px;left:43px;opacity:.55}
+.desi-art-store{position:absolute;bottom:10px;left:20px;width:180px;height:120px;background:#ffe4a5;border:7px solid #b75b39;border-bottom:0;border-radius:7px 7px 1px 1px}
+.desi-art-door{position:absolute;bottom:0;left:57px;height:83px;width:57px;background:#2e6848;border:5px solid #d39453;border-bottom:0}
+.desi-art-window{position:absolute;bottom:39px;left:9px;width:39px;height:52px;border:5px solid #d39453;background:#f0bd62}
+.desi-art-jar{position:absolute;bottom:10px;width:18px;height:25px;border-radius:4px 4px 3px 3px;background:#c15e3a;border-top:5px solid #e9ba75}
+.desi-art-jar.one{left:13px}.desi-art-jar.two{left:36px;background:#749968}
+.desi-art-awning{position:absolute;top:31px;left:8px;right:8px;height:50px;z-index:3;display:flex;overflow:hidden;border-radius:12px 12px 13px 13px;box-shadow:0 7px 0 #9d3b28}
+.desi-art-awning span{flex:1;background:#ffdc94;border-radius:0 0 10px 10px}
+.desi-art-awning span:nth-child(2n){background:#a94430}
+.desi-art-base{position:absolute;bottom:7px;left:0;right:0;height:9px;background:#e4a85d;border-radius:100%}
+.desi-section-heading{display:flex;align-items:center;gap:14px;max-width:990px;margin:27px 0 14px;color:var(--desi-clay);font-weight:900;font-size:13px;letter-spacing:.08em}
+.desi-deco-line{height:1px;background:var(--ui-border);flex:1}
+.desi-section-heading .desi-deco-line:last-child{flex:4}
+.desi-khata{background:var(--ui-panel);border:1px solid var(--ui-border);border-radius:22px;box-shadow:var(--desi-shadow);overflow:hidden;position:relative}
+.desi-khata:before{content:"";position:absolute;left:25px;top:0;bottom:0;border-left:1px solid rgba(185,84,54,.22);pointer-events:none}
+.desi-khata-top{display:flex;align-items:center;gap:14px;padding:23px 32px 17px 47px;border-bottom:1px dashed var(--ui-border);position:relative}
+.desi-khata-mark{height:42px;width:42px;border-radius:12px;display:grid;place-items:center;background:var(--desi-gold-light);color:var(--desi-clay);font-size:26px;font-weight:900}
+.desi-khata-top>div{display:flex;flex-direction:column;gap:4px}.desi-khata-top strong{font-weight:900;font-size:18px}.desi-khata-top small{font-size:11px;letter-spacing:.06em;color:var(--ui-sub);font-weight:750}
+.desi-khata-corner{font-size:30px;margin-left:auto;color:var(--desi-saffron)}
+.desi-khata-values{display:grid;grid-template-columns:1fr 1fr;padding:24px 29px 29px 48px;gap:22px;background-image:repeating-linear-gradient(to bottom,transparent 0,transparent 43px,rgba(64,116,96,.06) 44px)}
+.desi-value{display:flex;align-items:flex-start;flex-direction:column;gap:8px;padding:0 6px;min-width:0}
+.desi-value+.desi-value{border-left:1px dashed var(--ui-border);padding-left:30px}
+.desi-value-icon{width:36px;height:36px;border-radius:10px;display:grid;place-items:center;font-size:21px}
+.desi-value-icon.receive{color:#1e7052;background:#def5e4}.desi-value-icon.spend{color:#ad512d;background:#fff0df}
+.desi-value-label{font-size:13px;color:var(--ui-sub);font-weight:800}
+.desi-value strong{font-weight:900;font-size:clamp(24px,3vw,38px);font-variant-numeric:tabular-nums;white-space:nowrap;letter-spacing:-.04em}
+.desi-khata-bottom{padding:14px 25px 14px 46px;display:flex;align-items:center;justify-content:space-between;gap:12px;border-top:1px dashed var(--ui-border);background:var(--desi-raised)}
+.desi-khata-bottom>span{font-size:12px;line-height:1.5;color:var(--ui-sub)}
+.desi-khata-bottom button{display:flex;gap:9px;align-items:center;min-height:41px;padding:8px 13px;border-radius:9px;background:var(--ui-action);color:var(--ui-action-text);font-size:13px;font-weight:850;white-space:nowrap}
+.desi-khata-bottom button .material-symbols-outlined{font-size:18px}
+.desi-state{padding:25px 42px;min-height:90px}.desi-state button{display:inline-block;padding:8px 12px;margin-left:10px;border-radius:9px;border:1px solid var(--ui-border)}
+.desi-todo-heading{margin-top:32px}
+.desi-feature-grid{display:grid;grid-template-columns:1fr 1fr;gap:17px}
+.desi-feature{min-height:174px;display:flex;flex-direction:column;align-items:flex-start;position:relative;text-align:left;padding:24px 25px;border:1px solid var(--ui-border);border-radius:20px;transition:transform .16s,box-shadow .16s;color:var(--ui-text)}
+.desi-feature:hover{transform:translateY(-3px);box-shadow:var(--desi-shadow)}
+.desi-feature.league{background:var(--desi-gold-light)}.desi-feature.help{background:var(--desi-raised)}
+.desi-feature-icon{display:grid;place-items:center;width:44px;height:44px;border-radius:13px;background:var(--ui-panel);border:1px solid var(--ui-border);color:var(--desi-clay)}
+.desi-feature-icon .material-symbols-outlined{font-size:26px}
+.desi-feature-title{margin-top:13px;font-size:22px;font-weight:900;letter-spacing:-.025em}
+.desi-feature small{font-size:13px;color:var(--ui-sub);margin-top:5px;padding-right:18px;line-height:1.6}
+.desi-feature-arrow{position:absolute;right:23px;top:28px;color:var(--desi-clay)}
+.desi-extra-toggle{margin:23px auto 0;display:flex;align-items:center;justify-content:center;gap:10px;min-height:50px;color:var(--ui-text);font-weight:850;font-size:14px;padding:8px 18px;border:1px solid var(--ui-border);border-radius:30px;background:var(--ui-panel)}
+.desi-extra-toggle>.material-symbols-outlined{font-size:20px;color:var(--desi-clay)}
+.desi-extra-grid{margin-top:15px;display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:11px}
+.desi-extra-grid button{display:flex;align-items:center;gap:10px;min-height:63px;border:1px solid var(--ui-border);border-radius:13px;background:var(--ui-panel);padding:12px;font-size:13px;font-weight:750;text-align:left;color:var(--ui-text)}
+.desi-extra-grid button .material-symbols-outlined:first-child{color:var(--desi-clay)}.desi-extra-grid button .material-symbols-outlined:last-child{margin-left:auto;font-size:18px}
+.desi-privacy-foot{display:flex;align-items:center;justify-content:center;gap:7px;font-size:12px;color:var(--ui-sub);margin:25px 0 4px;text-align:center}
+.desi-privacy-foot .material-symbols-outlined{font-size:18px}
+.desi-bottom-nav{display:none}
+/* Landing screen */
+.desi-landing{min-height:100vh;display:flex;flex-direction:column;overflow:hidden}
+.desi-landing-header{display:flex;align-items:center;justify-content:space-between;gap:15px;padding:23px clamp(20px,5vw,66px);border-bottom:1px solid var(--ui-border);background:var(--ui-panel)}
+.desi-landing-actions{display:flex;align-items:center;gap:11px}
+.desi-landing-main{width:min(1250px,100%);margin:auto;display:grid;grid-template-columns:1.08fr .82fr;gap:clamp(26px,6vw,82px);align-items:center;padding:55px 28px 50px}
+.desi-landing-hero{position:relative;min-width:0}
+.desi-badge{display:inline-flex;align-items:center;gap:9px;padding:9px 13px;background:var(--desi-gold-light);color:var(--desi-clay);border:1px solid var(--ui-border);border-radius:50px;font-size:13px;font-weight:850}
+.desi-badge .material-symbols-outlined{font-size:19px}
+.desi-landing-hero h1{font-size:clamp(44px,5.8vw,77px);line-height:1.18;letter-spacing:-.055em;font-weight:950;margin:24px 0 16px;color:var(--ui-text)}
+.desi-landing-hero>p{font-size:clamp(17px,1.5vw,21px);color:var(--ui-sub);line-height:1.75;max-width:570px}
+.desi-landing-points{display:flex;flex-wrap:wrap;gap:10px;margin:28px 0}
+.desi-landing-points>span{display:flex;align-items:center;gap:7px;font-size:12px;font-weight:800;padding:9px 12px;background:var(--ui-panel);border:1px solid var(--ui-border);border-radius:11px}
+.desi-landing-points .material-symbols-outlined{font-size:18px;color:var(--desi-clay)}
+.desi-landing-pattern{position:absolute;right:0;top:0;display:flex;gap:13px;font-size:20px;color:var(--desi-saffron);opacity:.65}
+.desi-landing-art{height:148px;max-width:470px;margin-top:15px;position:relative;display:flex;align-items:end;justify-content:center}
+.desi-art-arch{width:230px;height:135px;border:10px solid #b96741;border-bottom:7px solid #ad5c39;border-radius:110px 110px 4px 4px;background:#f2ca87;position:relative;display:flex;flex-direction:column;align-items:center;justify-content:flex-end;box-shadow:0 8px 0 #d0a86c}
+.desi-arch-sign{position:absolute;top:13px;font-weight:900;color:#2c5e49;font-size:13px}
+.desi-art-arch .desi-art-awning{position:relative;left:auto;right:auto;top:auto;width:192px;height:35px;display:flex;flex-shrink:0;box-shadow:none;border-radius:5px 5px 9px 9px}
+.desi-art-arch .desi-art-awning i{flex:1;background:#b5543b;border-radius:0 0 6px 6px}
+.desi-art-arch .desi-art-awning i:nth-child(even){background:#fff0b2}
+.desi-arch-shelves{height:51px;width:160px;display:flex;align-items:center;justify-content:space-evenly;gap:5px;background:linear-gradient(#2c6852 0 80%,#d59b51 81%);color:#efc37b}
+.desi-arch-shelves>span{background:#9f4a2f;font-size:20px;padding:0 3px}
+.desi-landing-art-leaf{position:absolute;color:var(--desi-clay);font-size:48px;bottom:25px}.desi-landing-art-leaf.left{left:50px}.desi-landing-art-leaf.right{right:50px}
+.desi-landing-signin{background:var(--ui-panel);border:1px solid var(--ui-border);border-radius:26px;box-shadow:var(--desi-shadow);padding:clamp(26px,3vw,44px);position:relative;overflow:hidden}
+.desi-landing-signin:before{content:"";position:absolute;top:0;left:0;right:0;height:7px;background:repeating-linear-gradient(90deg,var(--desi-clay) 0 34px,var(--desi-saffron) 34px 68px,var(--ui-action) 68px 102px)}
+.desi-signin-top{font-size:12px;color:var(--desi-clay);font-weight:850;letter-spacing:.08em}
+.desi-signin-emblem{width:66px;height:66px;display:grid;place-items:center;border-radius:20px;background:var(--desi-gold-light);margin:30px 0 23px;color:var(--desi-clay)}
+.desi-signin-emblem .material-symbols-outlined{font-size:33px}
+.desi-landing-signin h2{font-size:clamp(26px,2.6vw,36px);line-height:1.25;font-weight:900;letter-spacing:-.04em}
+.desi-landing-signin>p{font-size:16px;line-height:1.7;color:var(--ui-sub);margin:12px 0 27px}
+.desi-signin-button{width:100%;min-height:59px;display:flex;align-items:center;gap:14px;justify-content:center;padding:12px 17px;border-radius:15px;background:var(--ui-action);color:var(--ui-action-text);font-size:16px;font-weight:850}
+.desi-signin-button .material-symbols-outlined{margin-left:auto}.desi-google-mark{width:28px;height:28px;border-radius:50%;display:grid;place-items:center;background:#fff;color:#4285f4;font-weight:950;font-size:18px}
+.desi-signin-button:disabled{opacity:.55}
+.desi-signin-error{color:#b34a2d;padding:12px;border-radius:10px;background:var(--desi-gold-light);margin-top:12px;font-size:14px}
+.desi-signin-privacy{display:flex;align-items:flex-start;gap:8px;padding-top:20px;margin-top:24px;border-top:1px dashed var(--ui-border);font-size:12px;line-height:1.6;color:var(--ui-sub)}
+.desi-signin-privacy .material-symbols-outlined{font-size:18px;color:var(--desi-olive)}
+.desi-landing-footer{text-align:center;padding:20px;color:var(--ui-sub);display:flex;gap:12px;align-items:center;justify-content:center;font-size:13px;font-weight:750}.desi-landing-footer span{color:var(--desi-saffron)}
+/* All inner pages: paper panels, short hierarchy, and large affordances */
+.easy-page{max-width:900px!important;color:var(--ui-text)!important}
+.easy-page-title{position:relative;margin-bottom:24px!important;padding-bottom:18px;border-bottom:1px solid var(--ui-border)}
+.easy-page-title:before{content:"✦";display:inline-flex;color:var(--desi-clay);font-size:17px;margin-right:7px}
+.easy-page-title h2{display:inline;font-size:clamp(28px,3vw,39px);color:var(--ui-text)}
+.easy-page-title p{color:var(--ui-sub)}
+.easy-panel,.easy-step,.easy-list-item,.easy-help-choice,.easy-notice,.easy-answer,.easy-empty{border-color:var(--ui-border)!important;background:var(--ui-panel)!important;box-shadow:var(--desi-shadow)}
+.easy-step>span{background:var(--desi-gold-light)!important;color:var(--desi-clay)!important}
+.easy-primary{background:var(--ui-action)!important;color:var(--ui-action-text)!important}
+.easy-list-item summary:hover,.easy-help-choice:hover{background:var(--desi-gold-light)}
+.easy-tabs button[aria-pressed=true]{background:var(--ui-action);color:var(--ui-action-text)}
+.easy-list-item summary,.easy-help-choice{min-height:72px}
+@media (max-width:1100px){
+ .desi-welcome-art{width:175px;transform:scale(.82);transform-origin:right bottom;margin-right:0}
+ .desi-welcome h2{font-size:34px}
+ .desi-landing-main{gap:30px}
+}
+@media(max-width:900px){
+ .dashboard-content{margin-left:0}.desi-header.simple-header{left:0}
+ .desi-sidebar.simple-sidebar{position:fixed;left:0;width:min(290px,85vw);height:100dvh;z-index:85}
+ .sidebar-container{display:none}
+ .sidebar-container.menu-open{display:block;position:fixed;inset:0;z-index:85}
+ .mobile-scrim{display:block;position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:80}
+ .mobile-menu-button,.sidebar-close{display:flex}
+ .desi-bottom-nav{display:grid;grid-template-columns:repeat(4,1fr);position:fixed;z-index:55;left:0;right:0;bottom:0;padding:8px 7px max(8px,env(safe-area-inset-bottom));background:var(--ui-panel);border-top:1px solid var(--ui-border);box-shadow:0 -6px 18px rgba(44,48,29,.05)}
+ .desi-bottom-nav button{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:4px;padding:5px 1px;min-height:54px;border-radius:11px;color:var(--ui-sub);font-size:11px;font-weight:850;line-height:1.2;text-align:center}
+ .desi-bottom-nav button .material-symbols-outlined{font-size:24px}
+ .desi-bottom-nav button.active{color:var(--ui-action-text);background:var(--ui-action)}
+ .dashboard-main{padding-bottom:110px!important}
+ .desi-landing-main{grid-template-columns:1fr;max-width:660px;padding-top:40px}
+ .desi-landing-art{height:80px;overflow:hidden}.desi-landing-art .desi-art-arch{transform:scale(.72);transform-origin:center bottom}
+ .desi-landing-hero h1{font-size:clamp(40px,6vw,64px)}
+}
+@media(max-width:600px){
+ .desi-header.simple-header{min-height:72px;padding:10px 13px;gap:5px;flex-wrap:nowrap}
+ .desi-header .header-heading h1{font-size:18px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:150px}
+ .desi-header-mark{display:none}
+ .desi-header .header-actions{gap:5px;flex-wrap:nowrap;margin-left:auto}
+ .desi-lang-wrap{min-height:40px;padding-left:6px}.desi-lang-wrap>.material-symbols-outlined{font-size:16px}
+ .desi-lang-wrap .simple-language{min-height:38px;font-size:12px;max-width:76px;padding:6px 3px}
+ .desi-theme-toggle{min-height:40px;padding:0 9px;font-size:12px}.desi-theme-toggle .material-symbols-outlined{font-size:18px}
+ .desi-header .signout-button{min-height:40px;padding:0 8px}.desi-signout-text{display:none}
+ .dashboard-main{padding-top:100px!important;padding-left:14px;padding-right:14px}
+ .desi-welcome{min-height:190px;padding:26px 23px;border-radius:20px}
+ .desi-welcome h2{font-size:clamp(27px,6vw,35px);max-width:350px}
+ .desi-welcome p{font-size:13px;max-width:320px}
+ .desi-welcome-shop{margin-top:15px;font-size:11px}
+ .desi-welcome-art{display:none}
+ .desi-khata-top{padding:18px 22px 15px 35px}
+ .desi-khata:before{left:17px}
+ .desi-khata-values{padding:19px 16px 21px 30px;gap:4px}
+ .desi-value{padding:0 3px}.desi-value+.desi-value{padding-left:14px}
+ .desi-value strong{font-size:clamp(19px,5vw,27px);white-space:normal}
+ .desi-khata-bottom{padding:13px 15px 13px 30px;align-items:flex-start;flex-direction:column}
+ .desi-khata-bottom button{width:100%;justify-content:center}
+ .desi-feature-grid{gap:10px}.desi-feature{min-height:163px;padding:17px}
+ .desi-feature-title{font-size:18px}.desi-feature small{font-size:11px}
+ .desi-feature-arrow{right:13px;top:18px}
+ .desi-extra-grid{grid-template-columns:1fr 1fr}
+ .desi-landing-header{padding:17px 15px;flex-wrap:wrap}
+ .desi-landing-actions{margin-left:auto;gap:6px}
+ .desi-landing .desi-brand-words strong{font-size:18px}
+ .desi-landing-header .desi-brand-words small{display:none}
+ .desi-landing .desi-brand-mark{width:36px;height:36px;font-size:22px}
+ .desi-landing-main{padding:28px 18px 48px}
+ .desi-landing-hero h1{font-size:clamp(37px,9vw,52px)}
+ .desi-landing-hero>p{font-size:16px}
+ .desi-landing-points{gap:7px}.desi-landing-points>span{font-size:11px;padding:7px}
+ .desi-landing-art{display:none}
+ .desi-landing-signin{padding:26px 23px}
+}
+@media(prefers-reduced-motion:reduce){.desi-feature,.desi-side-nav button{transition:none!important}}
+
+
+/* Bazaar League — playful but not gamified financial promises */
+.desi-league{max-width:960px!important}
+.desi-league-hero{position:relative;display:flex;align-items:center;justify-content:space-between;gap:20px;background:var(--desi-gold-light);border:1px solid var(--ui-border);border-radius:23px;padding:31px clamp(21px,4vw,43px);overflow:hidden;min-height:176px}
+.desi-league-hero:before{content:"";position:absolute;width:180px;height:180px;border:2px dashed var(--desi-clay);border-radius:50%;right:65px;top:-85px;opacity:.35}
+.desi-league-kicker{color:var(--desi-clay);letter-spacing:.11em;font-size:11px;font-weight:900}
+.desi-league-copy{z-index:1}.desi-league-hero h2{font-size:clamp(30px,3.5vw,43px);font-weight:900;letter-spacing:-.04em;margin:10px 0 7px}
+.desi-league-hero p{color:var(--ui-sub);line-height:1.6;font-size:15px}
+.desi-league-trophy{font-size:75px!important;color:var(--desi-clay);padding:20px}
+.desi-league-selector{display:flex;gap:9px;align-items:center;margin:24px 0 22px}
+.desi-league-selector button{display:inline-flex;align-items:center;gap:8px;min-height:47px;padding:11px 20px;border:1px solid var(--ui-border);border-radius:50px;font-weight:800;background:var(--ui-panel);color:var(--ui-text)}
+.desi-league-selector button[aria-pressed="true"]{color:var(--ui-action-text);background:var(--ui-action)}
+.desi-league-selector .material-symbols-outlined{font-size:20px}
+.desi-league-state,.desi-league-join{background:var(--ui-panel);border:1px solid var(--ui-border);border-radius:20px;padding:clamp(24px,4vw,42px);text-align:center;box-shadow:var(--desi-shadow)}
+.desi-league-state>.material-symbols-outlined{font-size:46px;color:var(--desi-clay);display:block;margin-bottom:15px}
+.desi-league-state h3,.desi-league-join h3{font-size:24px;font-weight:900;letter-spacing:-.025em;margin:10px 0}
+.desi-league-state p,.desi-league-join p{line-height:1.7;color:var(--ui-sub);font-size:15px;max-width:490px;margin:10px auto 18px}
+.desi-join-icon{display:grid;place-items:center;width:65px;height:65px;margin:0 auto 18px;background:var(--desi-gold-light);border-radius:18px;font-size:33px!important;color:var(--desi-clay)}
+.desi-league-join label{display:block;font-weight:850;font-size:14px;text-align:left;max-width:390px;margin:25px auto 8px}
+.desi-league-join input{display:block;max-width:390px;width:100%;background:var(--desi-raised);border:1px solid var(--ui-border);border-radius:12px;min-height:52px;padding:11px 15px;color:var(--ui-text);font-size:16px;margin:0 auto}
+.desi-league-join .easy-primary{margin:16px auto;justify-content:center;gap:16px}
+.desi-league-join small{font-size:12px;color:var(--ui-sub)}
+.desi-league-fineprint{margin:22px auto 0;font-size:12px;line-height:1.8;color:var(--ui-sub);max-width:700px;text-align:center}
+.desi-league-results{display:grid;gap:11px}
+.desi-my-rank{display:flex;align-items:center;gap:22px;background:var(--ui-action);color:var(--ui-action-text);border-radius:18px;padding:17px 22px}
+.desi-my-rank span{font-size:13px;font-weight:800;letter-spacing:.05em}.desi-my-rank strong{font-size:38px;font-weight:950}.desi-my-rank small{font-size:13px;margin-left:auto}
+.desi-league-list{display:grid;gap:9px}.desi-league-row{display:flex;align-items:center;gap:18px;background:var(--ui-panel);border:1px solid var(--ui-border);border-radius:15px;min-height:74px;padding:14px 21px}
+.desi-league-row.mine{background:var(--desi-gold-light);border-color:var(--desi-saffron)}
+.desi-rank-medal{width:42px;height:42px;display:grid;place-items:center;font-size:26px;border-radius:12px;background:var(--desi-raised)}
+.desi-league-row>div{display:flex;flex-direction:column;gap:4px;min-width:0;flex:1}.desi-league-row>div strong{font-weight:850;overflow-wrap:anywhere}.desi-league-row>div small{font-size:12px;color:var(--ui-sub)}
+.desi-league-row>b{font-size:17px;font-variant-numeric:tabular-nums;white-space:nowrap}.desi-league-row>b small{font-weight:500;color:var(--ui-sub);font-size:12px}
+@media(max-width:600px){.desi-league-hero{padding:25px 21px}.desi-league-trophy{font-size:51px!important;padding:0}.desi-league-selector button{padding:10px 14px}.desi-league-row{padding:13px;gap:10px}.desi-league-row>b{font-size:14px}.desi-my-rank{gap:13px}.desi-my-rank strong{font-size:29px}.desi-my-rank small{font-size:11px}}
+
+
+/* More menu: inner scrollbar and an actual independent disclosure state */
+.desi-sidebar.simple-sidebar{overflow:hidden;min-height:0}
+.desi-side-nav.simple-nav{min-height:0;flex:1;overflow-y:auto;overscroll-behavior:contain;scrollbar-width:thin;scrollbar-color:var(--ui-border) transparent}
+.desi-side-nav .desi-more-nav{flex-shrink:0;position:sticky;bottom:0;z-index:1;background:var(--ui-panel);border:1px solid var(--ui-border)!important}
+.desi-side-nav .desi-more-nav.has-current{border-color:var(--desi-clay)!important}
+.desi-extra-links{display:flex;flex-direction:column;gap:2px;padding:4px 0 8px 12px;border-left:2px solid var(--ui-border);margin:0 0 0 20px;max-height:min(50vh,430px);overflow-y:auto;overscroll-behavior:contain;scrollbar-width:thin}
+.desi-extra-links button{min-height:42px!important;padding:9px 10px!important;gap:10px!important;font-size:13px!important;border-radius:9px!important}
+.desi-extra-links .vt-khata-target .material-symbols-outlined{font-size:18px!important}
+.desi-shop-card{flex-shrink:0;margin-bottom:14px}
+.desi-sidebar .sidebar-brand{flex-shrink:0;padding-top:16px;padding-bottom:12px}
+.desi-side-footer{flex-shrink:0;padding-top:12px;padding-bottom:13px}
+@media(max-height:690px){.desi-shop-card{margin-bottom:8px;padding:9px 12px}.desi-extra-links{max-height:42vh}.desi-sidebar .sidebar-brand{padding-top:11px;padding-bottom:8px}}

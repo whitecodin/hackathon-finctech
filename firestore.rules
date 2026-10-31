@@ -41,7 +41,7 @@ service cloud.firestore {
 
     // Merchants Collection: Enterprise profiles
     match /merchants/{merchantId} {
-      allow get: if isSignedIn();
+      allow get: if isSignedIn() && resource.data.userId == request.auth.uid;
       allow list: if isSignedIn() && resource.data.userId == request.auth.uid;
       allow create: if isSignedIn()
         && incoming().userId == request.auth.uid

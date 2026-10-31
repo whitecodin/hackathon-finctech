@@ -1,3 +1,4 @@
+import { apiFetch } from '../lib/api.ts';
 import React, { useState, useEffect, useRef } from 'react';
 import { Merchant } from '../types.ts';
 import { useAuth } from '../context/AuthContext.tsx';
@@ -249,7 +250,7 @@ export const GeminiLiveVoiceModal: React.FC<GeminiLiveVoiceModalProps> = ({
     setLiveState('thinking');
 
     try {
-      const res = await fetch('/api/coach/live-talk', {
+      const res = await apiFetch('/api/coach/live-talk', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({

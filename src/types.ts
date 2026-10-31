@@ -1,5 +1,16 @@
 export type NavPath = 
+  | 'merchant-league'
   | 'overview'
+  | 'auto-hisaab'
+  | 'daily-hisaab'
+  | 'udhar'
+  | 'stock'
+  | 'regulars'
+  | 'reconciliation'
+  | 'forecast'
+  | 'mohalla-power'
+  | 'audit-history'
+  | 'data-controls'
   | 'financial-passport'
   | 'credit-readiness'
   | 'transaction-safety'
@@ -30,6 +41,7 @@ export interface Merchant {
   category: string;
   location: string;
   city?: string;
+  district?: string;
   state?: string;
   pinCode: string;
   profilePhotoUrl?: string;

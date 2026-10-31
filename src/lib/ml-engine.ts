@@ -1,7 +1,6 @@
 /**
  * ML Underwriting & Anomaly Detection Engine
- * Simulates Scikit-learn Random Forest Classifier & Isolation Forest Outlier Detection
- * Normalized against Reserve Bank of India & NBFC Underwriting Frameworks
+ * Transparent rule-based educational estimates only. Not trained ML or a lender credit decision.
  */
 
 export interface UnderwritingInput {
@@ -35,7 +34,7 @@ export interface UnderwritingResult {
 }
 
 export function computeUnderwritingScore(input: UnderwritingInput): UnderwritingResult {
-  // Feature weights (derived from trained logistic regression / random forest on Indian retail MSME cohorts)
+  // Illustrative manually chosen weights; not derived from trained lender datasets.
   const wCashFlow = 0.30;
   const wRepayment = 0.25;
   const wActivity = 0.20;
@@ -103,8 +102,7 @@ export function computeUnderwritingScore(input: UnderwritingInput): Underwriting
 }
 
 /**
- * Isolation Forest Anomaly Scoring
- * Computes probability of transaction being an operational or fraud outlier
+ * Rule-based anomaly indicator (not a calibrated fraud probability)
  */
 export function computeTransactionAnomaly(params: {
   amount: number;
@@ -117,14 +115,14 @@ export function computeTransactionAnomaly(params: {
   const reasons: string[] = [];
 
   // Ratio check
-  const ratio = params.amount / params.averageSupplierOutflow;
+  const ratio = params.averageSupplierOutflow > 0 ? params.amount / params.averageSupplierOutflow : 0;
   if (ratio >= 3.0) {
     anomalyScore += 0.50;
     reasons.push(`Amount (₹${params.amount.toLocaleString('en-IN')}) is ${Math.round((ratio - 1) * 100)}% higher than normal supplier average (₹${params.averageSupplierOutflow.toLocaleString('en-IN')})`);
   }
 
   // Time / Day check (Off-hours: after 10 PM or before 6 AM)
-  if (params.hour >= 22 || params.hour <= 5) {
+  if (params.hour >= 22 || params.hour <= 5 || params.isSunday) {
     anomalyScore += 0.25;
     reasons.push(`Initiated off-hours at ${params.hour}:00, outside regular shop business hours`);
   }
@@ -139,6 +137,6 @@ export function computeTransactionAnomaly(params: {
     anomalyScore: Math.min(0.99, Number(anomalyScore.toFixed(2))),
     isAnomaly: anomalyScore >= 0.60,
     reasons,
-    ruleId: 'VTP-OD-340',
+    ruleId: 'VTP-RULE-001',
   };
 }
