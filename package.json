@@ -7,10 +7,11 @@
     "dev": "vite --host 127.0.0.1",
     "build": "vite build",
     "preview": "vite preview",
-    "start": "tsx supabase-server.ts",
+    "start": "tsx scripts/dev-api.ts",
     "clean": "rm -rf dist",
     "lint": "tsc --noEmit",
-    "dev:api": "tsx supabase-server.ts"
+    "test": "node --test tests/*.test.mjs",
+    "dev:api": "tsx scripts/dev-api.ts"
   },
   "dependencies": {
     "@google/genai": "^2.4.0",

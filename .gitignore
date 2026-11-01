@@ -16,3 +16,7 @@ node_modules/
 .bazaar_demo_backups/
 .cache/
 *.onnx
+
+# Local video renders, narrated media, and temporary browser-capture profiles
+hackathon_media/
+.vercel/

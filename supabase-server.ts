@@ -81,5 +81,4 @@ app.post('/api/coach/chat',secure,(_req,res)=>res.status(501).json({error:'AI as
 app.post('/api/coach/live-talk',secure,(_req,res)=>res.status(501).json({error:'Voice assistant not configured'}));
 app.post('/api/passport/generate',secure,(_req,res)=>res.status(501).json({error:'Verified passport issuance not implemented'}));
 app.get('/api/passport/verify/:uid',(_req,res)=>res.status(501).json({verified:false,error:'Verification not implemented'}));
-const port=Number(process.env.PORT||3001);
-app.listen(port,'127.0.0.1',()=>console.log('Supabase API ready on http://127.0.0.1:'+port));
+export default app;
